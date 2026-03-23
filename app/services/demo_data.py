@@ -330,8 +330,9 @@ def _churn_reason(client: Client, flags_summary) -> tuple[str, str]:
 def _profile_chips(client: Client, flags_summary) -> list[str]:
     chips: list[str] = []
     milestones = build_milestones(client, datetime.now(timezone.utc))
-    if milestones:
-        chips.append(f"Celebrate {milestones[0].value or milestones[0].type}")
+    display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
+    if display_milestone:
+        chips.append(f"Celebrate {display_milestone.value or display_milestone.type}")
     if client.profile_data and client.profile_data.fun_fact:
         chips.append("Reference fun fact")
     if flags_summary.welcome_back:
@@ -352,8 +353,9 @@ def _profile_chips(client: Client, flags_summary) -> list[str]:
 def _build_badges(client: Client, flags_summary) -> list[dict[str, str]]:
     badges: list[dict[str, str]] = []
     milestones = build_milestones(client, datetime.now(timezone.utc))
-    if milestones:
-        badges.append({"label": milestones[0].value or milestones[0].type, "tone": "birthday"})
+    display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
+    if display_milestone:
+        badges.append({"label": display_milestone.value or display_milestone.type, "tone": "birthday"})
     if flags_summary.birthday_this_week:
         badges.append({"label": "Birthday week", "tone": "birthday"})
     if flags_summary.welcome_back:
@@ -590,6 +592,7 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
     flags_summary = build_flag_summary(client, now)
     milestones = build_milestones(client, now)
     booking_milestone = _booking_milestone_label(client, booking, now)
+    display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
     booking_time = booking.starts_at if booking is not None else (client.activity.next_booking_at if client.activity else None)
     arrival = _format_booking_label(booking_time)
     if arrival == "Recently active":
@@ -599,8 +602,8 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
         notes.append(booking.class_name)
     if booking_milestone:
         notes.append(booking_milestone)
-    elif milestones:
-        notes.append(milestones[0].value or milestones[0].type)
+    elif display_milestone:
+        notes.append(display_milestone.value or display_milestone.type)
     if flags_summary.birthday_this_week:
         notes.append("Birthday this week")
     if flags_summary.welcome_back:
@@ -630,11 +633,12 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
     flags_summary = build_flag_summary(client, now)
     milestones = build_milestones(client, now)
     booking_milestone = _booking_milestone_label(client, booking, now)
+    display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
     visible_highlights: list[dict[str, str]] = []
     if booking_milestone:
         visible_highlights.append({"label": "Milestone", "value": booking_milestone})
-    elif milestones:
-        visible_highlights.append({"label": "Milestone", "value": milestones[0].value or milestones[0].type})
+    elif display_milestone:
+        visible_highlights.append({"label": "Milestone", "value": display_milestone.value or display_milestone.type})
     if flags_summary.welcome_back:
         visible_highlights.append({"label": "Return marker", "value": "Welcome-back moment after time away."})
     if flags_summary.birthday_this_week:
@@ -687,7 +691,7 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
 
 def _roster_sort_key(client: Client, now: datetime) -> tuple[int, str]:
     flags_summary = build_flag_summary(client, now)
-    has_milestone = bool(build_milestones(client, now))
+    has_milestone = any(item.type != "visit_count" for item in build_milestones(client, now))
     is_featured = (
         flags_summary.new_client
         or has_milestone
@@ -875,10 +879,11 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
             if booking_milestone:
                 break
         milestones = build_milestones(client, now)
+        display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
         if booking_milestone:
             celebrations.append(f"{_full_name(client)} · {booking_milestone}")
-        elif milestones:
-            celebrations.append(f"{_full_name(client)} · {milestones[0].value or milestones[0].type}")
+        elif display_milestone:
+            celebrations.append(f"{_full_name(client)} · {display_milestone.value or display_milestone.type}")
         elif flags_summary.birthday_this_week:
             celebrations.append(f"{_full_name(client)} · Birthday this week")
         elif flags_summary.welcome_back:
