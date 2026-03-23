@@ -947,6 +947,12 @@ input {
   border-color: var(--sunshine-line);
 }
 
+.celebration-spotlight {
+  background: var(--sunshine-soft);
+  border-color: var(--sunshine-line);
+}
+
+.celebration-spotlight small,
 .membership-spotlight small {
   display: block;
   margin-top: 6px;

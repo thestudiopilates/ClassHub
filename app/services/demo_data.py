@@ -533,6 +533,51 @@ def _membership_fit_summary(client: Client) -> dict[str, str]:
     }
 
 
+def _celebration_spotlight(client: Client, booking: Booking | None, now: datetime) -> dict[str, str]:
+    flags_summary = build_flag_summary(client, now)
+    booking_milestone = _booking_milestone_label(client, booking, now)
+    class_number_today = _booking_class_number_today(client, booking, now)
+
+    if booking_milestone:
+        return {
+            "title": "Celebration",
+            "value": booking_milestone,
+            "note": "Call this out clearly and make sure the front desk team celebrates it.",
+        }
+    if flags_summary.birthday_this_week:
+        return {
+            "title": "Celebration",
+            "value": "Birthday week",
+            "note": "A warm birthday acknowledgment or small prize moment would land well.",
+        }
+    if class_number_today == 1:
+        return {
+            "title": "Celebration",
+            "value": "1st class today",
+            "note": "Treat this like a welcome moment and make the first visit feel calm, clear, and personal.",
+        }
+    if flags_summary.welcome_back:
+        return {
+            "title": "Celebration",
+            "value": "Welcome-back visit",
+            "note": "Acknowledge the return and make re-entry feel easy and encouraging.",
+        }
+    next_milestone = next((value for value in sorted(VISIT_MILESTONES) if value > _canonical_client_lifetime_visits(client, now)), None)
+    if next_milestone is not None:
+        current = _canonical_client_lifetime_visits(client, now)
+        gap = next_milestone - current
+        return {
+            "title": "Celebration",
+            "value": f"{gap} away from {next_milestone}",
+            "note": "No prize moment today, but this client is getting close to the next milestone.",
+        }
+    return {
+        "title": "Celebration",
+        "value": "No active celebration",
+        "note": "Use the personal context and service cues instead of a prize or milestone callout.",
+    }
+
+
 def _membership_history_lines(client: Client) -> list[str]:
     memberships = sorted(
         client.memberships,
@@ -720,6 +765,7 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         "expand": {
             "assumption": client.notes[0].note_text if client.notes else "Use concise encouragement and contextual warmth.",
             "service": _profile_chips(client, flags_summary)[0],
+            "celebrationSpotlight": _celebration_spotlight(client, booking, now),
             "membershipSpotlight": _membership_fit_summary(client),
             "breakdowns": _visit_breakdowns(client, now),
             "notes": [
