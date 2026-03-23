@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.momence_tokens.json
+momence_ops.db
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+.DS_Store

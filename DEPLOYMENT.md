@@ -16,6 +16,7 @@ Repo:
 Runtime:
 
 - `runtime.txt` pins Python 3.11 for Railway/Nixpacks
+- `Dockerfile` is included and should be preferred for Railway deploys
 
 Start command:
 
@@ -34,6 +35,10 @@ Healthcheck path:
 Repo:
 
 - `thestudiopilates/ClassHub`
+
+Build:
+
+- if Railway asks, use the repo `Dockerfile`
 
 Start command:
 
