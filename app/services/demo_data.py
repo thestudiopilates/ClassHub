@@ -446,7 +446,7 @@ def _history_bookings(client: Client, now: datetime) -> list[Booking]:
         starts_at = _as_utc(booking.starts_at)
         if starts_at is None or starts_at >= now:
             continue
-        if (booking.status or "").lower() == "cancelled":
+        if (booking.status or "").lower() != "checked_in":
             continue
         history.append(booking)
     return history
@@ -456,6 +456,13 @@ def _top_count_lines(counter: Counter[str], *, limit: int = 3) -> list[str]:
     if not counter:
         return ["Still learning"]
     return [f"{label} ({count})" for label, count in counter.most_common(limit)]
+
+
+def _normalize_preference_label(value: str | None) -> str | None:
+    if not value:
+        return None
+    collapsed = " ".join(value.split()).strip()
+    return collapsed or None
 
 
 def _membership_fit_summary(client: Client) -> dict[str, str]:
@@ -557,10 +564,12 @@ def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
     format_counts: Counter[str] = Counter()
 
     for booking in history:
-        if booking.instructor_name:
-            instructor_counts[booking.instructor_name] += 1
-        if booking.class_name:
-            format_counts[booking.class_name] += 1
+        instructor_name = _normalize_preference_label(booking.instructor_name)
+        class_name = _normalize_preference_label(booking.class_name)
+        if instructor_name:
+            instructor_counts[instructor_name] += 1
+        if class_name:
+            format_counts[class_name] += 1
         starts_local = _booking_as_local(booking.starts_at)
         if starts_local is not None:
             weekday_counts[starts_local.strftime("%A")] += 1
@@ -717,10 +726,6 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
                 for item in [
                     f"Today's class number: {_ordinal_label(class_number_today)}"
                     if class_number_today is not None
-                    else None,
-                    f"How heard about us: {client.profile_data.heard_about_us}" if client.profile_data and client.profile_data.heard_about_us else None,
-                    f"Preferred instructor: {', '.join(favorite_instructors[:2])}"
-                    if favorite_instructors
                     else None,
                 ]
                 if item

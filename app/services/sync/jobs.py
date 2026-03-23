@@ -1269,7 +1269,7 @@ def recompute_preferences_from_bookings(db: Session, *, lookback_days: int = 180
         select(Booking).where(
             Booking.starts_at >= window_start,
             Booking.starts_at < now,
-            Booking.status != "cancelled",
+            Booking.status == "checked_in",
         )
     ).all()
 
