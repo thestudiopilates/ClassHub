@@ -919,6 +919,11 @@ function renderSessions() {
                       <strong>Today matters</strong>
                       <p>${alertModel.primary ? `${alertModel.primary.label}: ${alertModel.primary.text}` : entry.visibleHighlights?.[0]?.value || "Warm, personal service will likely land best."}</p>
                     </div>
+                    <div class="service-card membership-spotlight">
+                      <strong>${entry.expand.membershipSpotlight?.title || "Membership fit"}</strong>
+                      <p>${entry.expand.membershipSpotlight?.value || "Membership review"}</p>
+                      <small>${entry.expand.membershipSpotlight?.note || "Review current plan and expiration."}</small>
+                    </div>
                     <div class="service-card">
                       <strong>Team move</strong>
                       <p>${entry.expand.service}</p>

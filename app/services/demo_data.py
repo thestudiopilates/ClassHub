@@ -720,6 +720,7 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         "expand": {
             "assumption": client.notes[0].note_text if client.notes else "Use concise encouragement and contextual warmth.",
             "service": _profile_chips(client, flags_summary)[0],
+            "membershipSpotlight": _membership_fit_summary(client),
             "breakdowns": _visit_breakdowns(client, now),
             "notes": [
                 item
