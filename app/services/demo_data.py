@@ -314,8 +314,6 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
         notes.append("Birthday this week")
     if flags_summary.welcome_back:
         notes.append("First visit back after a gap")
-    if client.profile_data and client.profile_data.fun_fact:
-        notes.append(client.profile_data.fun_fact)
     if not notes:
         notes = ["Active client", "Warm check-in opportunity"]
     lifetime_visits = _canonical_lifetime_visits(client.activity)
