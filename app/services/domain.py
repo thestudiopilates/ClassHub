@@ -327,7 +327,7 @@ def get_instructor_view(
         stmt = stmt.where(Booking.momence_session_id == session_id)
     if instructor_name:
         stmt = stmt.where(Booking.instructor_name == instructor_name)
-    bookings = _prefer_official_bookings(db.scalars(stmt.order_by(Booking.starts_at)).all())
+    bookings = prefer_official_bookings(db.scalars(stmt.order_by(Booking.starts_at)).all())
 
     client_ids = {booking.client_id for booking in bookings}
     clients_stmt = (
