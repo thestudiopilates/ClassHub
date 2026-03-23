@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Studio Pilates Ops Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Nunito+Sans:wght@300;400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/demo/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-lockup">
+          <div class="brand-mark">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div>
+            <p class="eyebrow">The Studio Pilates</p>
+            <h1>Operations</h1>
+          </div>
+        </div>
+
+        <div class="sidebar-panel">
+          <p class="eyebrow">Today at a glance</p>
+          <div class="stat-grid" id="summary-stats"></div>
+        </div>
+
+        <div class="sidebar-panel">
+          <p class="eyebrow">Freshness</p>
+          <div class="freshness-list" id="freshness-list"></div>
+        </div>
+
+        <div class="sidebar-panel is-celebrate">
+          <p class="eyebrow">Celebrate this week</p>
+          <ul class="celebration-list" id="celebrations"></ul>
+        </div>
+      </aside>
+
+      <main class="main-stage">
+        <header class="hero">
+          <div class="hero-brand">
+            <div class="brand-mark brand-mark-small">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <div class="hero-brand-copy">
+              <p class="eyebrow">The Studio Pilates</p>
+              <strong>Ops</strong>
+            </div>
+          </div>
+          <label class="search">
+            <input id="search-input" type="search" placeholder="Try Monica, birthday, or Power Flow" />
+          </label>
+          <div class="hero-controls">
+            <div class="view-toggle" role="tablist" aria-label="View mode">
+              <button class="toggle" data-view="frontdesk">Front Desk</button>
+              <button class="toggle is-active" data-view="instructor">Class Live</button>
+            </div>
+          </div>
+        </header>
+
+        <div class="location-selector" role="tablist" aria-label="Location selector">
+          <button class="location-pill is-active" data-location="emory" type="button">Emory</button>
+          <button class="location-pill" data-location="west-midtown" type="button">West Midtown</button>
+        </div>
+
+        <section class="board board-frontdesk" data-panel="frontdesk">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Front desk queue</p>
+              <h3>Arrivals, priorities, and service moments</h3>
+            </div>
+            <p class="section-note">Top cards bring birthdays, churn risk, and membership context to the front.</p>
+          </div>
+          <div class="card-grid" id="frontdesk-grid"></div>
+        </section>
+
+        <section class="board board-instructor" data-panel="instructor">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Instructor live view</p>
+              <h3>Every person in the room, with the right amount of context</h3>
+            </div>
+            <p class="section-note" id="live-day-note">Highlights stay visible on the roster for today. Tap a card to drop down teaching cues, stats, and service prompts.</p>
+          </div>
+          <div class="session-layout">
+            <div class="session-list" id="session-list"></div>
+            <div class="session-roster" id="session-roster"></div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="profile-rail">
+        <div class="profile-header">
+          <p class="eyebrow">Client profile</p>
+          <button class="ghost-button" id="profile-close" type="button">Close</button>
+        </div>
+        <div id="profile-panel" class="profile-panel">
+          <div class="empty-state">
+            <p>Select a client card or a class roster member to see their profile details here.</p>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <script src="/static/demo/app.js"></script>
+  </body>
+  </html>

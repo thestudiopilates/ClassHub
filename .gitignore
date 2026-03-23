@@ -1,0 +1,8 @@
+.env
+.momence_tokens.json
+__pycache__/
+.pytest_cache/
+.venv/
+momence_ops.db
+*.pyc
+.DS_Store
