@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -270,6 +270,112 @@ def _profile_details(client: Client, churn_level: str, current_reason: str) -> l
     return details[:8]
 
 
+def _history_bookings(client: Client, now: datetime) -> list[Booking]:
+    history: list[Booking] = []
+    for booking in client.bookings:
+        starts_at = _as_utc(booking.starts_at)
+        if starts_at is None or starts_at >= now:
+            continue
+        if (booking.status or "").lower() == "cancelled":
+            continue
+        history.append(booking)
+    return history
+
+
+def _top_count_lines(counter: Counter[str], *, limit: int = 3) -> list[str]:
+    if not counter:
+        return ["Still learning"]
+    return [f"{label} ({count})" for label, count in counter.most_common(limit)]
+
+
+def _membership_fit_summary(client: Client) -> dict[str, str]:
+    activity = client.activity
+    if activity is None or not activity.active_membership_name:
+        return {
+            "title": "Membership fit",
+            "value": "No active membership on file",
+            "note": "Use recent attendance to suggest the best next option.",
+        }
+
+    membership_name = activity.active_membership_name
+    visits_last_30 = activity.visits_last_30d or 0
+    normalized = membership_name.lower()
+
+    if "unlimited" in normalized:
+        if visits_last_30 >= 8:
+            note = f"{visits_last_30} visits in the last 30 days. Unlimited looks like a strong fit."
+        elif visits_last_30 >= 4:
+            note = f"{visits_last_30} visits in the last 30 days. Still reasonable, but worth monitoring."
+        else:
+            note = f"{visits_last_30} visits in the last 30 days. A smaller recurring option or pack may fit better."
+        return {"title": membership_name, "value": "Current plan fit", "note": note}
+
+    expected_classes = None
+    for token in normalized.replace("/", " ").replace("-", " ").split():
+        digits = "".join(ch for ch in token if ch.isdigit())
+        if digits:
+            expected_classes = int(digits)
+            break
+
+    if expected_classes is not None:
+        if visits_last_30 >= expected_classes:
+            note = f"{visits_last_30} visits in the last 30 days against a {expected_classes}-class plan. They are at or above plan pace."
+        elif visits_last_30 >= max(expected_classes - 2, 1):
+            note = f"{visits_last_30} visits in the last 30 days against a {expected_classes}-class plan. This looks like a healthy fit."
+        else:
+            note = f"{visits_last_30} visits in the last 30 days against a {expected_classes}-class plan. They may be under-using this membership."
+        return {"title": membership_name, "value": "Current plan fit", "note": note}
+
+    if "pack" in normalized:
+        if visits_last_30 >= 8:
+            note = f"{visits_last_30} visits in the last 30 days. A monthly membership may be a better fit than a pack."
+        else:
+            note = f"{visits_last_30} visits in the last 30 days. Pack usage still looks reasonable."
+        return {"title": membership_name, "value": "Current plan fit", "note": note}
+
+    return {
+        "title": membership_name,
+        "value": "Current plan fit",
+        "note": f"{visits_last_30} visits in the last 30 days. Good candidate for a manual membership-fit review.",
+    }
+
+
+def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
+    history = _history_bookings(client, now)
+    instructor_counts: Counter[str] = Counter()
+    weekday_counts: Counter[str] = Counter()
+    format_counts: Counter[str] = Counter()
+
+    for booking in history:
+        if booking.instructor_name:
+            instructor_counts[booking.instructor_name] += 1
+        if booking.class_name:
+            format_counts[booking.class_name] += 1
+        starts_local = _booking_as_local(booking.starts_at)
+        if starts_local is not None:
+            weekday_counts[starts_local.strftime("%A")] += 1
+
+    membership_fit = _membership_fit_summary(client)
+    return [
+        {
+            "title": "Visits by instructor",
+            "items": _top_count_lines(instructor_counts),
+        },
+        {
+            "title": "Visits by weekday",
+            "items": _top_count_lines(weekday_counts),
+        },
+        {
+            "title": "Visits by format",
+            "items": _top_count_lines(format_counts),
+        },
+        {
+            "title": membership_fit["title"],
+            "items": [membership_fit["value"], membership_fit["note"]],
+        },
+    ]
+
+
 def _client_to_demo_person(client: Client) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     flags_summary = build_flag_summary(client, now)
@@ -371,11 +477,11 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         "expand": {
             "assumption": client.notes[0].note_text if client.notes else "Use concise encouragement and contextual warmth.",
             "service": _profile_chips(client, flags_summary)[0],
+            "breakdowns": _visit_breakdowns(client, now),
             "notes": [
                 item
                 for item in [
                     f"How heard about us: {client.profile_data.heard_about_us}" if client.profile_data and client.profile_data.heard_about_us else None,
-                    f"Fun fact: {client.profile_data.fun_fact}" if client.profile_data and client.profile_data.fun_fact else None,
                     f"Preferred instructor: {', '.join(favorite_instructors[:2])}"
                     if favorite_instructors
                     else None,
@@ -415,6 +521,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
             selectinload(Client.milestones),
             selectinload(Client.profile_data),
             selectinload(Client.preferences),
+            selectinload(Client.bookings),
             selectinload(Client.flags),
         )
         .order_by(
@@ -459,6 +566,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
                     selectinload(Client.milestones),
                     selectinload(Client.profile_data),
                     selectinload(Client.preferences),
+                    selectinload(Client.bookings),
                     selectinload(Client.flags),
                 )
             )

@@ -910,7 +910,7 @@ function renderSessions() {
                   <span class="expand-summary">Teaching cues, service assumptions, and risk rules</span>
                   <button class="expand-button" type="button" data-expand-id="${entry.personId}">
                     <span>${expanded ? "▾" : "▸"}</span>
-                    <span>${expanded ? "Less context" : "More context"}</span>
+                    <span>${expanded ? "Hide Full Profile" : "See Full Profile"}</span>
                   </button>
                 </div>
                 <div class="expand-details">
@@ -932,8 +932,23 @@ function renderSessions() {
                       <p>${person.profile.subtext}</p>
                     </div>
                   </div>
+                  <div class="breakdown-grid">
+                    ${entry.expand.breakdowns
+                      .map(
+                        (section) => `
+                          <article class="breakdown-card">
+                            <strong>${section.title}</strong>
+                            <div class="breakdown-list">
+                              ${section.items.map((item) => `<span>${item}</span>`).join("")}
+                            </div>
+                          </article>
+                        `,
+                      )
+                      .join("")}
+                  </div>
                   <div class="inline-detail-grid">
                     ${person.profile.details
+                      .filter((detail) => !["Fun fact", "Preferred instructor", "Preferred format"].includes(detail.label))
                       .map(
                         (detail) => `
                           <div class="detail-item ${detailTone(detail.label)}">

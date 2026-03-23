@@ -709,10 +709,15 @@ input {
   color: var(--cherry);
 }
 
-.metrics,
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
 .class-banner-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
@@ -855,6 +860,7 @@ input {
   font-size: 13px;
   font-weight: 700;
   padding: 0;
+  white-space: nowrap;
 }
 
 .expand-button:hover {
@@ -875,6 +881,39 @@ input {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.breakdown-card {
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--oat);
+  border: 1px solid var(--stat-border);
+}
+
+.breakdown-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--terracotta);
+}
+
+.breakdown-list {
+  display: grid;
+  gap: 5px;
+}
+
+.breakdown-list span {
+  font-size: 13px;
+  color: var(--coffee);
 }
 
 .assumption-card,
@@ -1015,6 +1054,7 @@ input {
   .detail-grid,
   .inline-detail-grid,
   .expand-grid,
+  .breakdown-grid,
   .metrics,
   .session-layout,
   .class-banner-grid,
