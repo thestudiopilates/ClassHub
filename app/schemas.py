@@ -224,6 +224,20 @@ class SeedNotePayload(BaseModel):
     source_updated_at: Optional[datetime] = None
 
 
+class SeedMembershipPayload(BaseModel):
+    source_membership_id: Optional[str] = None
+    membership_name: Optional[str] = None
+    membership_type: Optional[str] = None
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    status: Optional[str] = None
+    classes_left: Optional[int] = None
+    money_left: Optional[int] = None
+    is_frozen: bool = False
+    renewal_cancelled: bool = False
+    source_updated_at: Optional[datetime] = None
+
+
 class SeedClientPayload(BaseModel):
     member_id: str
     first_name: Optional[str] = None
@@ -237,6 +251,7 @@ class SeedClientPayload(BaseModel):
     profile_data: Optional[SeedProfileDataPayload] = None
     preferences: Optional[SeedPreferencesPayload] = None
     notes: List[SeedNotePayload] = []
+    memberships: List[SeedMembershipPayload] = []
 
 
 class SeedImportRequest(BaseModel):

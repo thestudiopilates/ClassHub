@@ -14,7 +14,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Booking, Client, ClientActivity, ClientNote, ClientPreference, ClientProfileData, SyncRun, SyncState
+from app.db.models import Booking, Client, ClientActivity, ClientMembership, ClientNote, ClientPreference, ClientProfileData, SyncRun, SyncState
 from app.schemas import BookingHistoryProgressResponse, SyncRunResponse
 from app.services.domain import refresh_all_flags
 from app.services.momence.browser import MomenceBrowserClient
@@ -204,6 +204,54 @@ def _select_active_membership_name(memberships: dict, now: datetime) -> tuple[bo
     return False, None
 
 
+def _safe_int(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_membership_rows(memberships: dict, now: datetime) -> list[dict]:
+    rows: list[dict] = []
+    collections = (
+        ("subscription", memberships.get("subscriptions") or []),
+        ("credit", memberships.get("creditsAndEvents") or []),
+        ("subscription", memberships.get("netflixSubscriptions") or []),
+    )
+    for membership_type, items in collections:
+        for item in items:
+            source_id = item.get("id") or item.get("membershipId") or item.get("subscriptionId") or item.get("creditId")
+            started_at = _parse_iso_datetime(item.get("startDate") or item.get("createdAt"))
+            ended_at = _parse_iso_datetime(item.get("endDate"))
+            status = "active"
+            if item.get("isVoided"):
+                status = "voided"
+            elif ended_at and ended_at < now:
+                status = "ended"
+            elif item.get("isFrozen"):
+                status = "frozen"
+            elif item.get("renewalCancelled"):
+                status = "renewal_cancelled"
+            rows.append(
+                {
+                    "source_membership_id": str(source_id) if source_id is not None else None,
+                    "membership_name": item.get("membershipName"),
+                    "membership_type": membership_type,
+                    "started_at": started_at,
+                    "ended_at": ended_at,
+                    "status": status,
+                    "classes_left": _safe_int(item.get("classesLeft")),
+                    "money_left": _safe_int(item.get("moneyLeft")),
+                    "is_frozen": bool(item.get("isFrozen")),
+                    "renewal_cancelled": bool(item.get("renewalCancelled")),
+                    "source_updated_at": _parse_iso_datetime(item.get("updatedAt") or item.get("modifiedAt") or item.get("createdAt")),
+                }
+            )
+    return rows
+
+
 def _apply_member_context(db: Session, client: Client, context: dict, now: datetime) -> int:
     notes = context.get("notes") or []
     memberships = context.get("memberships") or {}
@@ -216,6 +264,26 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
     activity.active_membership_name = membership_name
     activity.activity_updated_at = now
     db.add(activity)
+
+    db.query(ClientMembership).filter(ClientMembership.client_id == client.id).delete()
+    membership_rows = _normalize_membership_rows(memberships, now)
+    for row in membership_rows:
+        db.add(
+            ClientMembership(
+                client_id=client.id,
+                source_membership_id=row["source_membership_id"],
+                membership_name=row["membership_name"],
+                membership_type=row["membership_type"],
+                started_at=row["started_at"],
+                ended_at=row["ended_at"],
+                status=row["status"],
+                classes_left=row["classes_left"],
+                money_left=row["money_left"],
+                is_frozen=row["is_frozen"],
+                renewal_cancelled=row["renewal_cancelled"],
+                source_updated_at=row["source_updated_at"],
+            )
+        )
 
     db.query(ClientNote).filter(ClientNote.client_id == client.id).delete()
     inserted = 0

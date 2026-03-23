@@ -340,6 +340,30 @@ def _membership_fit_summary(client: Client) -> dict[str, str]:
     }
 
 
+def _membership_history_lines(client: Client) -> list[str]:
+    memberships = sorted(
+        client.memberships,
+        key=lambda item: item.started_at or item.ended_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    if not memberships:
+        active_name = client.activity.active_membership_name if client.activity else None
+        return [active_name] if active_name else ["No membership history loaded yet"]
+
+    lines: list[str] = []
+    for membership in memberships[:6]:
+        label = membership.membership_name or "Membership"
+        status = (membership.status or "unknown").replace("_", " ")
+        dates = []
+        if membership.started_at:
+            dates.append(_booking_as_local(membership.started_at).strftime("%b %-d, %Y"))
+        if membership.ended_at:
+            dates.append(_booking_as_local(membership.ended_at).strftime("%b %-d, %Y"))
+        date_label = " to ".join(dates) if dates else "Dates not available"
+        lines.append(f"{label} · {status.title()} · {date_label}")
+    return lines
+
+
 def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
     history = _history_bookings(client, now)
     instructor_counts: Counter[str] = Counter()
@@ -368,6 +392,10 @@ def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
         {
             "title": "Visits by format",
             "items": _top_count_lines(format_counts),
+        },
+        {
+            "title": "Membership history",
+            "items": _membership_history_lines(client),
         },
         {
             "title": membership_fit["title"],
@@ -521,6 +549,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
             selectinload(Client.milestones),
             selectinload(Client.profile_data),
             selectinload(Client.preferences),
+            selectinload(Client.memberships),
             selectinload(Client.bookings),
             selectinload(Client.flags),
         )
@@ -566,6 +595,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
                     selectinload(Client.milestones),
                     selectinload(Client.profile_data),
                     selectinload(Client.preferences),
+                    selectinload(Client.memberships),
                     selectinload(Client.bookings),
                     selectinload(Client.flags),
                 )

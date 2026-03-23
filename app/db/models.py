@@ -34,6 +34,7 @@ class Client(Base):
     flags: Mapped[Optional["ClientFlag"]] = relationship(back_populates="client", uselist=False)
     notes: Mapped[list[ClientNote]] = relationship(back_populates="client")
     milestones: Mapped[list[Milestone]] = relationship(back_populates="client")
+    memberships: Mapped[list["ClientMembership"]] = relationship(back_populates="client")
     bookings: Mapped[list[Booking]] = relationship(back_populates="client")
 
 
@@ -135,6 +136,26 @@ class ClientPreference(Base):
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     client: Mapped[Client] = relationship(back_populates="preferences")
+
+
+class ClientMembership(Base):
+    __tablename__ = "client_memberships"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), index=True)
+    source_membership_id: Mapped[Optional[str]] = mapped_column(Text, index=True)
+    membership_name: Mapped[Optional[str]] = mapped_column(Text)
+    membership_type: Mapped[Optional[str]] = mapped_column(Text)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    status: Mapped[Optional[str]] = mapped_column(Text)
+    classes_left: Mapped[Optional[int]] = mapped_column(Integer)
+    money_left: Mapped[Optional[int]] = mapped_column(Integer)
+    is_frozen: Mapped[bool] = mapped_column(Boolean, default=False)
+    renewal_cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    client: Mapped[Client] = relationship(back_populates="memberships")
 
 
 class Milestone(Base):

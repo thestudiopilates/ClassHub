@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.models import Client, ClientActivity, ClientNote, ClientPreference, ClientProfileData
+from app.db.models import Client, ClientActivity, ClientMembership, ClientNote, ClientPreference, ClientProfileData
 from app.services.momence.client import MomenceClient
 from app.services.automation import run_preopen_ops_sync
 from app.schemas import (
@@ -157,6 +157,7 @@ def debug_import_momence_tokens(request: MomenceTokenImportRequest) -> dict:
 def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db)) -> SeedImportResponse:
     imported_clients = 0
     imported_notes = 0
+    imported_memberships = 0
     imported_profile_rows = 0
     imported_preference_rows = 0
     imported_birthdays = 0
@@ -227,6 +228,27 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
                 )
                 imported_notes += 1
 
+        if item.memberships:
+            db.query(ClientMembership).filter(ClientMembership.client_id == client.id).delete()
+            for membership in item.memberships:
+                db.add(
+                    ClientMembership(
+                        client_id=client.id,
+                        source_membership_id=membership.source_membership_id,
+                        membership_name=membership.membership_name,
+                        membership_type=membership.membership_type,
+                        started_at=membership.started_at,
+                        ended_at=membership.ended_at,
+                        status=membership.status,
+                        classes_left=membership.classes_left,
+                        money_left=membership.money_left,
+                        is_frozen=membership.is_frozen,
+                        renewal_cancelled=membership.renewal_cancelled,
+                        source_updated_at=membership.source_updated_at,
+                    )
+                )
+                imported_memberships += 1
+
         imported_clients += 1
 
     db.commit()
@@ -237,8 +259,13 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
         record_sync_state(db, "customer_fields", status="completed", records_processed=imported_profile_rows)
     if imported_preference_rows:
         record_sync_state(db, "behavior", status="completed", records_processed=imported_preference_rows)
-    if imported_notes:
-        record_sync_state(db, "memberships_notes", status="completed", records_processed=imported_notes)
+    if imported_notes or imported_memberships:
+        record_sync_state(
+            db,
+            "memberships_notes",
+            status="completed",
+            records_processed=max(imported_notes, imported_memberships),
+        )
     recomputed = False
     if request.recompute_flags:
         refresh_all_flags(db)
