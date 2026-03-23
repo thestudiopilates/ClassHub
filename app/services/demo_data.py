@@ -214,6 +214,16 @@ def _booking_milestone_label(client: Client, booking: Booking | None, now: datet
     return None
 
 
+def _ordinal_label(value: int | None) -> str | None:
+    if value is None:
+        return None
+    if 10 <= value % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(value % 10, "th")
+    return f"{value}{suffix}"
+
+
 def _slug_client(client: Client) -> str:
     return client.momence_member_id
 
@@ -613,6 +623,7 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
     milestones = build_milestones(client, now)
     booking_milestone = _booking_milestone_label(client, booking, now)
     display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
+    class_number_today = _booking_class_number_today(client, booking, now)
     booking_time = booking.starts_at if booking is not None else (client.activity.next_booking_at if client.activity else None)
     arrival = _format_booking_label(booking_time)
     if arrival == "Recently active":
@@ -622,6 +633,8 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
         notes.append(booking.class_name)
     if booking_milestone:
         notes.append(booking_milestone)
+    elif class_number_today is not None:
+        notes.append(f"{_ordinal_label(class_number_today)} class today")
     elif display_milestone:
         notes.append(display_milestone.value or display_milestone.type)
     if flags_summary.birthday_this_week:
@@ -654,10 +667,13 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
     flags_summary = build_flag_summary(client, now)
     milestones = build_milestones(client, now)
     booking_milestone = _booking_milestone_label(client, booking, now)
+    class_number_today = _booking_class_number_today(client, booking, now)
     display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
     visible_highlights: list[dict[str, str]] = []
     if booking_milestone:
         visible_highlights.append({"label": "Milestone", "value": booking_milestone})
+    elif class_number_today == 1:
+        visible_highlights.append({"label": "Today", "value": "1st class today. Make the first visit feel personal and calm."})
     elif display_milestone:
         visible_highlights.append({"label": "Milestone", "value": display_milestone.value or display_milestone.type})
     if flags_summary.welcome_back:
@@ -699,6 +715,9 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
             "notes": [
                 item
                 for item in [
+                    f"Today's class number: {_ordinal_label(class_number_today)}"
+                    if class_number_today is not None
+                    else None,
                     f"How heard about us: {client.profile_data.heard_about_us}" if client.profile_data and client.profile_data.heard_about_us else None,
                     f"Preferred instructor: {', '.join(favorite_instructors[:2])}"
                     if favorite_instructors
