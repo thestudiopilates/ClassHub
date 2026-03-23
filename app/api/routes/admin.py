@@ -9,10 +9,12 @@ from app.services.automation import run_preopen_ops_sync
 from app.schemas import (
     BookingHistoryProgressResponse,
     BookingHistoryRunRequest,
+    MomenceTokenImportRequest,
     RosterHistoryRunRequest,
     SyncRunResponse,
     TargetedRefreshRequest,
 )
+from app.services.momence.token_store import save_tokens
 from app.services.sync.jobs import (
     get_booking_history_progress,
     refresh_clients_by_member_ids,
@@ -127,4 +129,14 @@ async def debug_momence_sessions(
         "start": start.isoformat(),
         "end": end.isoformat(),
         **(await client.debug_session_window(start, end)),
+    }
+
+
+@router.post("/debug/momence/import-tokens")
+def debug_import_momence_tokens(request: MomenceTokenImportRequest) -> dict:
+    tokens = save_tokens(dict(request.payload))
+    return {
+        "connected": bool(tokens.get("access_token")),
+        "has_refresh_token": bool(tokens.get("refresh_token")),
+        "expires_at": tokens.get("expires_at"),
     }

@@ -179,3 +179,7 @@ class BookingCheckInResponse(BaseModel):
     provider: str = "momence"
     checked_in: bool = True
     response: Dict[str, object] = {}
+
+
+class MomenceTokenImportRequest(BaseModel):
+    payload: Dict[str, object]
