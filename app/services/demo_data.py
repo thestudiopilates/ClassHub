@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -426,11 +427,21 @@ def _membership_fit_summary(client: Client) -> dict[str, str]:
         return {"title": membership_name, "value": "Current plan fit", "note": note}
 
     expected_classes = None
-    for token in normalized.replace("/", " ").replace("-", " ").split():
-        digits = "".join(ch for ch in token if ch.isdigit())
-        if digits:
-            expected_classes = int(digits)
-            break
+    patterns = [
+        r"(\d+)\s*x\s*month",
+        r"(\d+)\s*class\s*pack",
+        r"(\d+)\s*class",
+        r"single\s*class",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized)
+        if not match:
+            continue
+        if pattern == r"single\s*class":
+            expected_classes = 1
+        else:
+            expected_classes = int(match.group(1))
+        break
 
     if expected_classes is not None:
         if visits_last_30 >= expected_classes:
