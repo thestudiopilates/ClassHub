@@ -673,10 +673,11 @@ function renderFrontdesk() {
       const checkIn = item.bookingId ? state.checkInByBookingId[item.bookingId] : null;
       const isNew = isNewClient(person, item);
       const alertModel = buildAlertModel(person, item);
-      const badgeMarkup = item.badges.length
+      const frontdeskBadges = item.badges.filter((badge) => !/risk/i.test(badge.label));
+      const badgeMarkup = frontdeskBadges.length
         ? `
             <div class="badge-row">
-              ${item.badges.map((badge) => `<span class="badge ${toneClass(badge.tone)}">${badge.label}</span>`).join("")}
+              ${frontdeskBadges.map((badge) => `<span class="badge ${toneClass(badge.tone)}">${badge.label}</span>`).join("")}
             </div>
           `
         : "";
