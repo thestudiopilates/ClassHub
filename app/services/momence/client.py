@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from functools import cached_property
 from urllib.parse import urlencode
 import secrets
@@ -162,17 +162,61 @@ class MomenceClient:
                 page += 1
         return payload
 
-    async def fetch_session_bookings_between(self, start: date, end: date) -> list[dict]:
-        sessions = await self._get_paginated(
-            "/api/v2/host/sessions",
-            params={
+    @staticmethod
+    def _session_window_param_attempts(start: date | datetime, end: date | datetime) -> list[dict]:
+        if isinstance(start, datetime):
+            start_dt = start.astimezone(timezone.utc) if start.tzinfo else start.replace(tzinfo=timezone.utc)
+        else:
+            start_dt = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        if isinstance(end, datetime):
+            end_dt = end.astimezone(timezone.utc) if end.tzinfo else end.replace(tzinfo=timezone.utc)
+        else:
+            end_dt = datetime.combine(end, datetime.min.time(), tzinfo=timezone.utc)
+
+        start_day = start_dt.date().isoformat()
+        end_day = end_dt.date().isoformat()
+        start_iso = start_dt.isoformat()
+        end_iso = end_dt.isoformat()
+        next_day_iso = (end_dt + timedelta(days=1)).date().isoformat()
+
+        attempts = [
+            {
                 "sortBy": "startsAt",
                 "sortOrder": "ASC",
-                "startAfter": start.isoformat(),
-                "startBefore": end.isoformat(),
-                "includeCancelled": "false",
+                "startAfter": start_day,
+                "startBefore": next_day_iso,
+                "includeCancelled": False,
             },
-        )
+            {
+                "sortBy": "startsAt",
+                "sortOrder": "ASC",
+                "startAfter": start_day,
+                "startBefore": end_day,
+                "includeCancelled": False,
+            },
+            {
+                "sortBy": "startsAt",
+                "sortOrder": "ASC",
+                "startAfter": start_iso,
+                "startBefore": end_iso,
+                "includeCancelled": False,
+            },
+            {
+                "sortBy": "startsAt",
+                "sortOrder": "ASC",
+                "startAfter": start_day,
+                "endBefore": end_day,
+                "includeCancelled": False,
+            },
+        ]
+        return attempts
+
+    async def fetch_session_bookings_between(self, start: date, end: date) -> list[dict]:
+        sessions: list[dict] = []
+        for params in self._session_window_param_attempts(start, end):
+            sessions = await self._get_paginated("/api/v2/host/sessions", params=params)
+            if sessions:
+                break
         bookings: list[dict] = []
         async with await self._authorized_client() as client:
             for session in sessions:
@@ -187,7 +231,7 @@ class MomenceClient:
                             "pageSize": page_size,
                             "sortBy": "createdAt",
                             "sortOrder": "ASC",
-                            "includeCancelled": "false",
+                            "includeCancelled": False,
                         },
                     )
                     try:
