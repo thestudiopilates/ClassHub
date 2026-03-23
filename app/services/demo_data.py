@@ -58,6 +58,36 @@ def _canonical_lifetime_visits(activity: ClientActivity | None) -> int:
     return max(baseline_total, fallback_total, rolling_floor)
 
 
+def _membership_sort_key(value) -> datetime:
+    fallback = datetime.min.replace(tzinfo=timezone.utc)
+    candidate = value.started_at or value.ended_at or value.source_updated_at
+    if candidate is None:
+        return fallback
+    current = _as_utc(candidate)
+    return current or fallback
+
+
+def _active_memberships(client: Client) -> list:
+    now = datetime.now(timezone.utc)
+    active: list = []
+    for membership in client.memberships:
+        status = (membership.status or "").lower()
+        ended_at = _as_utc(membership.ended_at)
+        if status == "active" or ended_at is None or ended_at >= now:
+            active.append(membership)
+    active.sort(key=_membership_sort_key, reverse=True)
+    return active
+
+
+def _active_membership_label(client: Client) -> str | None:
+    memberships = _active_memberships(client)
+    if memberships:
+        return memberships[0].membership_name or "Active membership"
+    if client.activity and client.activity.active_membership_name:
+        return client.activity.active_membership_name
+    return None
+
+
 def _slug_client(client: Client) -> str:
     return client.momence_member_id
 
@@ -243,6 +273,7 @@ def _profile_details(client: Client, churn_level: str, current_reason: str) -> l
     )
     favorite_formats = [item for item in (preferences.favorite_formats or "").split("|") if item] if preferences else []
     lifetime_visits = _canonical_lifetime_visits(activity)
+    active_membership_name = _active_membership_label(client)
     details: list[dict[str, str]] = [
         {"label": "Lifetime classes", "value": str(lifetime_visits)},
         {"label": "Last 30 days", "value": str(activity.visits_last_30d) if activity else "0"},
@@ -259,7 +290,7 @@ def _profile_details(client: Client, churn_level: str, current_reason: str) -> l
         },
         {
             "label": "Membership",
-            "value": activity.active_membership_name if activity and activity.active_membership_name else "No active membership",
+            "value": active_membership_name or "No active membership",
         },
         {"label": "Churn risk", "value": f"{churn_level.title()} · {current_reason}"},
     ]
@@ -290,15 +321,15 @@ def _top_count_lines(counter: Counter[str], *, limit: int = 3) -> list[str]:
 
 def _membership_fit_summary(client: Client) -> dict[str, str]:
     activity = client.activity
-    if activity is None or not activity.active_membership_name:
+    membership_name = _active_membership_label(client)
+    if not membership_name:
         return {
             "title": "Membership fit",
             "value": "No active membership on file",
             "note": "Use recent attendance to suggest the best next option.",
         }
 
-    membership_name = activity.active_membership_name
-    visits_last_30 = activity.visits_last_30d or 0
+    visits_last_30 = activity.visits_last_30d if activity else 0
     normalized = membership_name.lower()
 
     if "unlimited" in normalized:
@@ -343,11 +374,11 @@ def _membership_fit_summary(client: Client) -> dict[str, str]:
 def _membership_history_lines(client: Client) -> list[str]:
     memberships = sorted(
         client.memberships,
-        key=lambda item: item.started_at or item.ended_at or datetime.min.replace(tzinfo=timezone.utc),
+        key=_membership_sort_key,
         reverse=True,
     )
     if not memberships:
-        active_name = client.activity.active_membership_name if client.activity else None
+        active_name = _active_membership_label(client)
         return [active_name] if active_name else ["No membership history loaded yet"]
 
     lines: list[str] = []
@@ -413,7 +444,7 @@ def _client_to_demo_person(client: Client) -> dict[str, Any]:
     return {
         "id": _slug_client(client),
         "name": _full_name(client),
-        "membership": client.activity.active_membership_name if client.activity and client.activity.active_membership_name else "No active membership",
+        "membership": _active_membership_label(client) or "No active membership",
         "funFact": client.profile_data.fun_fact if client.profile_data and client.profile_data.fun_fact else "No fun fact collected yet",
         "churnRisk": {
             "level": flags_summary.churn_risk or ("new" if flags_summary.new_client else "low"),
