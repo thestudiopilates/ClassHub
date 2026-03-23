@@ -592,6 +592,11 @@ def _read_upcoming_bookings_from_host_api() -> list[dict]:
     return asyncio.run(client.fetch_upcoming_bookings(now, window_end))
 
 
+def _read_upcoming_bookings_window_from_host_api(window_start: datetime, window_end: datetime) -> list[dict]:
+    client = MomenceClient()
+    return asyncio.run(client.fetch_upcoming_bookings(window_start, window_end))
+
+
 def _read_booking_history_window_from_host_api(window_start: datetime, window_end: datetime) -> list[dict]:
     client = MomenceClient()
     return asyncio.run(client.fetch_session_bookings_between(window_start, window_end))
@@ -703,6 +708,24 @@ def sync_upcoming_bookings(db: Session) -> SyncRunResponse:
         record_sync_state(db, "bookings", status="completed", records_processed=records_processed)
         return _finish_run(db, run, "completed", records_processed)
     except Exception as exc:  # pragma: no cover - scaffolding path
+        db.rollback()
+        record_sync_state(db, "bookings", status="failed", records_processed=0, error_text=str(exc))
+        return _finish_run(db, run, "failed", 0, str(exc))
+
+
+def sync_bookings_for_day(db: Session, day: date) -> SyncRunResponse:
+    run = _start_run(db, "sync_bookings_for_day")
+    try:
+        start_local = datetime.combine(day, datetime.min.time(), tzinfo=LOCAL_TZ)
+        end_local = start_local + timedelta(days=1)
+        window_start = start_local.astimezone(timezone.utc)
+        window_end = end_local.astimezone(timezone.utc)
+        api_rows = _read_upcoming_bookings_window_from_host_api(window_start, window_end)
+        records_processed, _ = _upsert_upcoming_bookings_from_api(db, api_rows)
+        db.commit()
+        record_sync_state(db, "bookings", status="completed", records_processed=records_processed)
+        return _finish_run(db, run, "completed", records_processed)
+    except Exception as exc:
         db.rollback()
         record_sync_state(db, "bookings", status="failed", records_processed=0, error_text=str(exc))
         return _finish_run(db, run, "failed", 0, str(exc))
