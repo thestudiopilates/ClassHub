@@ -174,3 +174,11 @@ class SyncState(Base):
     status: Mapped[str] = mapped_column(Text, default="unknown")
     records_processed: Mapped[int] = mapped_column(Integer, default=0)
     error_text: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class AuthToken(Base):
+    __tablename__ = "auth_tokens"
+
+    provider: Mapped[str] = mapped_column(Text, primary_key=True)
+    payload_json: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

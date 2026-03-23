@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.db.models import AuthToken
+from app.db.session import SessionLocal
 
 
 def _token_path() -> Path:
@@ -13,6 +15,13 @@ def _token_path() -> Path:
 
 
 def load_tokens() -> dict[str, Any] | None:
+    try:
+        with SessionLocal() as db:
+            row = db.get(AuthToken, "momence")
+            if row and row.payload_json:
+                return json.loads(row.payload_json)
+    except Exception:
+        pass
     path = _token_path()
     if not path.exists():
         return None
@@ -48,11 +57,31 @@ def save_tokens(payload: dict[str, Any]) -> dict[str, Any]:
     elif expires_at_raw:
         normalized["expires_at"] = expires_at_raw
 
+    try:
+        with SessionLocal() as db:
+            row = db.get(AuthToken, "momence")
+            if row is None:
+                row = AuthToken(provider="momence", payload_json="{}")
+                db.add(row)
+            row.payload_json = json.dumps(normalized)
+            row.updated_at = datetime.utcnow()
+            db.commit()
+    except Exception:
+        pass
+
     path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
     return normalized
 
 
 def clear_tokens() -> None:
+    try:
+        with SessionLocal() as db:
+            row = db.get(AuthToken, "momence")
+            if row is not None:
+                db.delete(row)
+                db.commit()
+    except Exception:
+        pass
     path = _token_path()
     if path.exists():
         path.unlink()
