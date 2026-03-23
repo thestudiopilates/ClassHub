@@ -116,6 +116,31 @@ def _prefer_official_bookings(bookings: list[Booking]) -> list[Booking]:
     return bookings
 
 
+def _filter_relevant_bookings(bookings: list[Booking], day: date) -> list[Booking]:
+    if not bookings:
+        return bookings
+
+    local_now = datetime.now(LOCAL_TZ)
+    if day != local_now.date():
+        return bookings
+
+    relevant: list[Booking] = []
+    for booking in bookings:
+        starts_local = _as_local(booking.starts_at)
+        if starts_local is None:
+            continue
+
+        ends_local = _as_local(booking.ends_at)
+        if ends_local is None:
+            ends_local = starts_local + timedelta(minutes=75)
+
+        # Keep classes that are still in progress or about to happen.
+        if ends_local >= local_now:
+            relevant.append(booking)
+
+    return relevant
+
+
 def _churn_reason(client: Client, flags_summary) -> tuple[str, str]:
     activity = client.activity
     current_30 = activity.visits_last_30d if activity else 0
@@ -396,6 +421,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     )
     bookings = db.scalars(bookings_stmt).all()
     bookings = _prefer_official_bookings(bookings)
+    bookings = _filter_relevant_bookings(bookings, current_day)
     client_by_id = {client.id: client for client in active_clients}
     if bookings:
         missing_ids = {booking.client_id for booking in bookings if booking.client_id not in client_by_id}
