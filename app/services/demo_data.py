@@ -9,19 +9,22 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import case, desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Booking, Client, ClientActivity, ClientFlag, Milestone
-from app.services.domain import VISIT_MILESTONES, build_client_profile, build_flag_summary, build_milestones
+from app.db.models import Booking, Client, ClientFlag, Milestone
+from app.services.client_intelligence import (
+    VISIT_MILESTONES,
+    as_utc as _as_utc,
+    attended_bookings as _attended_bookings,
+    booking_as_local as _booking_as_local,
+    canonical_client_lifetime_visits as _canonical_client_lifetime_visits,
+    canonical_visit_windows as _canonical_visit_windows,
+    normalize_format_label as _normalize_format_label,
+    normalize_instructor_key as _normalize_instructor_key,
+    normalize_text_label as _normalize_preference_label,
+)
+from app.services.domain import build_client_profile, build_flag_summary, build_milestones
 from app.services.sync_state import get_freshness_map
 
 LOCAL_TZ = ZoneInfo("America/New_York")
-
-
-def _as_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def _as_local(value: datetime | None) -> datetime | None:
@@ -29,14 +32,6 @@ def _as_local(value: datetime | None) -> datetime | None:
     if current is None:
         return None
     return current.astimezone(LOCAL_TZ)
-
-
-def _booking_as_local(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=LOCAL_TZ)
-    return value.astimezone(LOCAL_TZ)
 
 
 def _risk_rank(level: str | None) -> int:
@@ -47,59 +42,6 @@ def _risk_rank(level: str | None) -> int:
     if level == "low":
         return 1
     return 0
-
-
-def _canonical_lifetime_visits(activity: ClientActivity | None) -> int:
-    if activity is None:
-        return 0
-
-    baseline_total = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
-    fallback_total = activity.total_visits or 0
-    rolling_floor = (activity.visits_last_30d or 0) + (activity.visits_previous_30d or 0)
-    return max(baseline_total, fallback_total, rolling_floor)
-
-
-def _attended_bookings(client: Client, now: datetime | None = None) -> list[Booking]:
-    reference = now or datetime.now(timezone.utc)
-    attended: list[Booking] = []
-    for booking in client.bookings:
-        starts_at = _as_utc(booking.starts_at)
-        if starts_at is None or starts_at > reference:
-            continue
-        if booking.status != "checked_in":
-            continue
-        attended.append(booking)
-    attended.sort(key=lambda item: _as_utc(item.starts_at) or reference)
-    return attended
-
-
-def _canonical_client_lifetime_visits(client: Client, now: datetime | None = None) -> int:
-    attended = _attended_bookings(client, now)
-    if attended:
-        return len(attended)
-    return _canonical_lifetime_visits(client.activity)
-
-
-def _canonical_visit_windows(client: Client, now: datetime | None = None) -> tuple[int, int]:
-    reference = now or datetime.now(timezone.utc)
-    attended = _attended_bookings(client, reference)
-    activity = client.activity
-    activity_current = activity.visits_last_30d if activity else 0
-    activity_previous = activity.visits_previous_30d if activity else 0
-    if attended:
-        current_start = reference - timedelta(days=30)
-        previous_start = reference - timedelta(days=60)
-        current = sum(1 for booking in attended if (_as_utc(booking.starts_at) or reference) >= current_start)
-        previous = sum(
-            1
-            for booking in attended
-            if previous_start <= (_as_utc(booking.starts_at) or reference) < current_start
-        )
-        return max(current, activity_current or 0), max(previous, activity_previous or 0)
-    if activity is None:
-        return 0, 0
-    return activity_current or 0, activity_previous or 0
-
 
 def _join_date_label(client: Client) -> str:
     attended = _attended_bookings(client)
@@ -457,31 +399,6 @@ def _top_count_lines(counter: Counter[str], *, limit: int = 3) -> list[str]:
     if not counter:
         return ["Still learning"]
     return [f"{label} ({count})" for label, count in counter.most_common(limit)]
-
-
-def _normalize_preference_label(value: str | None) -> str | None:
-    if not value:
-        return None
-    collapsed = " ".join(value.split()).strip()
-    return collapsed or None
-
-
-def _normalize_format_label(value: str | None) -> str | None:
-    label = _normalize_preference_label(value)
-    if not label:
-        return None
-    label = re.sub(r"\s*-\s*(Emory|W\.?\s*Midtown|West\s*Midtown)\s*$", "", label, flags=re.IGNORECASE)
-    label = re.sub(r"\s*-\s*\((Emory|W\.?\s*Midtown|West\s*Midtown)\)\s*$", "", label, flags=re.IGNORECASE)
-    label = re.sub(r"\s*\((Emory|W\.?\s*Midtown|West\s*Midtown)\)\s*$", "", label, flags=re.IGNORECASE)
-    return " ".join(label.split()).strip()
-
-
-def _normalize_instructor_key(value: str | None) -> str | None:
-    label = _normalize_preference_label(value)
-    if not label:
-        return None
-    return re.sub(r"[^a-z0-9]+", "", label.casefold())
-
 
 def _membership_fit_summary(client: Client) -> dict[str, str]:
     membership_name = _active_membership_label(client)

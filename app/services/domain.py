@@ -24,18 +24,15 @@ from app.schemas import (
     SessionView,
     WeekAheadResponse,
 )
+from app.services.client_intelligence import (
+    VISIT_MILESTONES,
+    as_utc as _as_utc,
+    canonical_client_lifetime_visits,
+    canonical_visit_windows,
+)
 from app.services.sync_state import get_freshness_map
 
-VISIT_MILESTONES = {25, 50, 100, 200, 300, 400, 500, 750, 1000}
 LOCAL_TZ = ZoneInfo("America/New_York")
-
-
-def _as_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def _local_day_bounds(day: date) -> tuple[datetime, datetime]:
@@ -48,48 +45,10 @@ def _prefer_official_bookings(bookings: list[Booking]) -> list[Booking]:
     if any(booking.ends_at is not None for booking in bookings):
         return [booking for booking in bookings if booking.ends_at is not None]
     return bookings
-
-
-def _attended_bookings(client: Client, now: datetime) -> list[Booking]:
-    attended: list[Booking] = []
-    for booking in getattr(client, "bookings", []):
-        starts_at = _as_utc(booking.starts_at)
-        if starts_at is None or starts_at > now:
-            continue
-        if booking.status != "checked_in":
-            continue
-        attended.append(booking)
-    attended.sort(key=lambda item: _as_utc(item.starts_at) or now)
-    return attended
-
-
 def _visit_counts(client: Client, now: datetime) -> tuple[int, int, int]:
-    attended = _attended_bookings(client, now)
-    activity = client.activity
-    activity_lifetime = 0
-    activity_current = 0
-    activity_previous = 0
-    if activity is not None:
-        activity_lifetime = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
-        if activity_lifetime == 0:
-            activity_lifetime = activity.total_visits or 0
-        activity_current = activity.visits_last_30d or 0
-        activity_previous = activity.visits_previous_30d or 0
-    if attended:
-        current_start = now - timedelta(days=30)
-        previous_start = now - timedelta(days=60)
-        lifetime = len(attended)
-        current = sum(1 for booking in attended if (_as_utc(booking.starts_at) or now) >= current_start)
-        previous = sum(
-            1
-            for booking in attended
-            if previous_start <= (_as_utc(booking.starts_at) or now) < current_start
-        )
-        return max(lifetime, activity_lifetime), max(current, activity_current), max(previous, activity_previous)
-
-    if activity is None:
-        return 0, 0, 0
-    return activity_lifetime, activity_current, activity_previous
+    lifetime = canonical_client_lifetime_visits(client, now)
+    current, previous = canonical_visit_windows(client, now)
+    return lifetime, current, previous
 
 
 def compute_is_active_180d(activity: ClientActivity | None, now: datetime) -> bool:

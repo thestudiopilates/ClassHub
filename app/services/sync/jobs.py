@@ -16,6 +16,11 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import Booking, Client, ClientActivity, ClientMembership, ClientNote, ClientPreference, ClientProfileData, SyncRun, SyncState
 from app.schemas import BookingHistoryProgressResponse, SyncRunResponse
+from app.services.client_intelligence import (
+    as_utc as _as_utc,
+    normalize_format_label as _normalize_format_label,
+    normalize_instructor_key as _normalize_instructor_key,
+)
 from app.services.domain import refresh_all_flags
 from app.services.momence.browser import MomenceBrowserClient
 from app.services.momence.client import MomenceClient
@@ -148,16 +153,6 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
-
-
-def _as_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
 def _is_subscription_active(item: dict, now: datetime) -> bool:
     if item.get("isVoided"):
         return False
@@ -1200,29 +1195,6 @@ def _try_parse_report_datetime(value: str) -> datetime | None:
         except ValueError:
             continue
     return None
-
-
-def _normalize_format_label(value: str | None) -> str | None:
-    if not value:
-        return None
-    label = " ".join(str(value).split()).strip()
-    if not label:
-        return None
-    label = re.sub(r"\s*-\s*(Emory|W\.?\s*Midtown|West\s*Midtown)\s*$", "", label, flags=re.IGNORECASE)
-    label = re.sub(r"\s*-\s*\((Emory|W\.?\s*Midtown|West\s*Midtown)\)\s*$", "", label, flags=re.IGNORECASE)
-    label = re.sub(r"\s*\((Emory|W\.?\s*Midtown|West\s*Midtown)\)\s*$", "", label, flags=re.IGNORECASE)
-    return " ".join(label.split()).strip()
-
-
-def _normalize_instructor_key(value: str | None) -> str | None:
-    if not value:
-        return None
-    label = " ".join(str(value).split()).strip()
-    if not label:
-        return None
-    return re.sub(r"[^a-z0-9]+", "", label.casefold())
-
-
 def _best_display_labels(counter: Counter[str], display_map: dict[str, Counter[str]], *, limit: int = 3) -> list[str]:
     labels: list[str] = []
     for key, _ in counter.most_common(limit):
