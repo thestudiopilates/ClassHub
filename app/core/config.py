@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     momence_max_context_refresh_batch: int = 25
     momence_session_bookings_csv_path: str = ""
     momence_allow_browser_booking_report_sync: bool = False
+    momence_allow_behavior_report_sync: bool = False
+    momence_preserve_canonical_history: bool = True
     momence_upcoming_booking_days: int = 7
     momence_history_booking_days: int = 60
     momence_history_booking_chunk_days: int = 1

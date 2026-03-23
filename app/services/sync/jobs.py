@@ -1110,6 +1110,14 @@ def sync_browser_seed_data(db: Session) -> SyncRunResponse:
 def sync_client_behavior_from_reports(db: Session) -> SyncRunResponse:
     run = _start_run(db, "sync_client_behavior_from_reports")
     try:
+        if not settings.momence_allow_behavior_report_sync:
+            return _finish_run(
+                db,
+                run,
+                "completed",
+                0,
+                "Behavior report sync is disabled to preserve canonical history; use roster-driven syncs instead.",
+            )
         browser = MomenceBrowserClient()
         processed = 0
 
@@ -1154,9 +1162,20 @@ def _apply_customer_list_rows(db: Session, rows: list[dict[str, str]]) -> int:
             digits = "".join(ch for ch in row[visits_key] if ch.isdigit())
             if digits:
                 baseline = int(digits)
-                activity.lifetime_visits_baseline = baseline
+                existing_baseline = activity.lifetime_visits_baseline or 0
+                existing_total = activity.total_visits or 0
+                canonical_floor = max(
+                    existing_baseline,
+                    existing_total,
+                    (activity.visits_last_30d or 0) + (activity.visits_previous_30d or 0),
+                )
+                normalized_baseline = max(baseline, canonical_floor) if settings.momence_preserve_canonical_history else baseline
+                activity.lifetime_visits_baseline = normalized_baseline
                 activity.lifetime_visits_baseline_as_of = datetime.now(timezone.utc)
-                activity.total_visits = baseline + (activity.lifetime_visits_increment or 0)
+                activity.total_visits = max(
+                    existing_total,
+                    normalized_baseline + (activity.lifetime_visits_increment or 0),
+                )
         last_seen_key = _first_matching_key(row, ["last seen", "last activity", "last visit", "most recent visit"])
         if last_seen_key and row.get(last_seen_key):
             parsed = _try_parse_report_datetime(row[last_seen_key])
