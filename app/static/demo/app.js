@@ -448,6 +448,7 @@ const celebrations = document.getElementById("celebrations");
 const frontdeskGrid = document.getElementById("frontdesk-grid");
 const sessionList = document.getElementById("session-list");
 const sessionRoster = document.getElementById("session-roster");
+const summaryHeading = document.getElementById("summary-heading");
 const searchInput = document.getElementById("search-input");
 const locationButtons = Array.from(document.querySelectorAll(".location-pill"));
 const liveDayNote = document.getElementById("live-day-note");
@@ -469,8 +470,57 @@ function getPerson(personId) {
   return currentData.people[personId];
 }
 
+function locationLabel() {
+  return state.location === "west-midtown" ? "West Midtown" : "Emory";
+}
+
+function getFilteredFrontdeskItems() {
+  return currentData.frontdesk.filter((item) => {
+    const person = getPerson(item.id);
+    return matchesSelectedLocation(item.location) && matchesQuery([person.name, item.arrival, person.membership, item.notes.join(" "), item.location || ""]);
+  });
+}
+
+function getFilteredSessions() {
+  return currentData.sessions.filter(
+    (session) =>
+      matchesSelectedLocation(session.location) &&
+      matchesQuery([session.title, session.time, session.instructor, session.location, session.roster.map((item) => getPerson(item.personId).name).join(" ")]),
+  );
+}
+
+function buildLocationSummary() {
+  const sessions = getFilteredSessions();
+  const frontdeskItems = getFilteredFrontdeskItems();
+  const peopleInRoom = sessions.reduce((sum, session) => sum + (session.roster?.length || 0), 0);
+
+  let milestoneCount = 0;
+  let specialAlerts = 0;
+  for (const session of sessions) {
+    for (const rosterItem of session.roster || []) {
+      const person = getPerson(rosterItem.personId);
+      const badges = rosterItem.badges || [];
+      if (badges.some((badge) => /class|milestone|birthday/i.test(badge.label))) {
+        milestoneCount += 1;
+      }
+      if (person?.churnRisk?.level === "high" || person?.churnRisk?.level === "medium" || badges.some((badge) => /return|back after baby/i.test(badge.label))) {
+        specialAlerts += 1;
+      }
+    }
+  }
+
+  return [
+    { label: "Class live now", value: sessions.length },
+    { label: "People in room", value: peopleInRoom },
+    { label: "Milestones today", value: milestoneCount },
+    { label: "Special alerts", value: specialAlerts || frontdeskItems.filter((item) => item.badges.some((badge) => /risk|return/i.test(badge.label))).length },
+  ];
+}
+
 function renderSummary() {
-  summaryStats.innerHTML = currentData.summary
+  const locationSummary = buildLocationSummary();
+  summaryHeading.textContent = `${locationLabel()} snapshot`;
+  summaryStats.innerHTML = locationSummary
     .map(
       (item, index) => `
         <article class="stat-card ${index === 2 ? "is-milestones" : index === 3 && Number(item.value) > 0 ? "is-alerts" : ""}">
@@ -605,10 +655,7 @@ function buildAlertModel(person, item) {
 }
 
 function renderFrontdesk() {
-  const cards = currentData.frontdesk.filter((item) => {
-      const person = getPerson(item.id);
-    return matchesSelectedLocation(item.location) && matchesQuery([person.name, item.arrival, person.membership, item.notes.join(" "), item.location || ""]);
-  });
+  const cards = getFilteredFrontdeskItems();
 
   frontdeskGrid.style.gridTemplateColumns =
     cards.length === 2 ? "repeat(2, minmax(0, 1fr))" : cards.length >= 3 ? "repeat(3, minmax(0, 1fr))" : "1fr";
@@ -706,11 +753,7 @@ function renderFrontdesk() {
 }
 
 function renderSessions() {
-  const sessions = currentData.sessions.filter(
-    (session) =>
-      matchesSelectedLocation(session.location) &&
-      matchesQuery([session.title, session.time, session.instructor, session.location, session.roster.map((item) => getPerson(item.personId).name).join(" ")]),
-  );
+  const sessions = getFilteredSessions();
   liveDayNote.textContent = `Highlights stay visible on the roster for ${currentDayLabel()}, and the rest of the client summary expands downward right inside each card.`;
 
   if (!sessions.some((session) => session.id === state.selectedSessionId)) {
@@ -946,6 +989,7 @@ function render() {
   document.querySelectorAll(".board").forEach((panel) => {
     panel.classList.toggle("is-active", panel.dataset.panel === state.view);
   });
+  renderSummary();
   renderFrontdesk();
   renderSessions();
 }
@@ -963,7 +1007,6 @@ async function loadLiveDemoData() {
     const payload = await response.json();
     currentData = normalizeLiveData(payload);
     syncStateToCurrentData();
-    renderSummary();
     render();
   } catch (error) {
     console.error("Falling back to local demo data", error);

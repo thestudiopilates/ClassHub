@@ -317,6 +317,19 @@ input {
   gap: 12px;
 }
 
+.summary-strip,
+.freshness-footer {
+  background: var(--white);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  padding: 12px 14px;
+}
+
+.freshness-footer {
+  margin-top: auto;
+}
+
 .hero {
   display: grid;
   grid-template-columns: auto minmax(0, 400px) auto;
@@ -442,6 +455,11 @@ input {
   gap: 10px;
   align-items: end;
   margin-bottom: 10px;
+}
+
+.section-head.section-head-compact {
+  margin-bottom: 8px;
+  align-items: start;
 }
 
 .section-head h3 {
