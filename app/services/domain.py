@@ -26,7 +26,7 @@ from app.schemas import (
 )
 from app.services.sync_state import get_freshness_map
 
-VISIT_MILESTONES = {1, 5, 10, 25, 50, 100, 250}
+VISIT_MILESTONES = {25, 50, 100, 200, 300, 400, 500, 750, 1000}
 LOCAL_TZ = ZoneInfo("America/New_York")
 
 
@@ -113,7 +113,12 @@ def build_flag_summary(client: Client, now: datetime) -> FlagsSummary:
     birthday_today, birthday_this_week = compute_birthday_flags(client.birthday, today)
     activity = client.activity
     injury = any(note.is_injury_flag for note in client.notes)
-    new_client = bool(activity and activity.total_visits <= 1)
+    total_visits = 0
+    if activity:
+        total_visits = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
+        if total_visits == 0:
+            total_visits = activity.total_visits or 0
+    new_client = bool(activity and total_visits <= 1)
     welcome_back = False
     last_checkin_at = _as_utc(activity.last_checkin_at) if activity else None
     next_booking_at = _as_utc(activity.next_booking_at) if activity else None
@@ -172,7 +177,7 @@ def build_milestones(client: Client, now: datetime) -> list[MilestoneSummary]:
         milestones.append(
             MilestoneSummary(
                 type="visit_count",
-                value=f"{total_visits} visits",
+                value=f"{total_visits}th class",
                 date=now.date(),
             )
         )

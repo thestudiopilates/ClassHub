@@ -878,30 +878,28 @@ def _recompute_client_activity_from_bookings(db: Session, client: Client, now: d
     ).all()
 
     if bookings:
-        activity.first_visit_at = bookings[0].starts_at
-        activity.last_booking_at = bookings[-1].starts_at
+        non_cancelled = [booking for booking in bookings if booking.status != "cancelled"]
+        if non_cancelled:
+            activity.last_booking_at = non_cancelled[-1].starts_at
 
-        past_attended = [
+        attended = [
             booking
-            for booking in bookings
-            if (_as_utc(booking.starts_at) or now) <= now and booking.status != "cancelled"
+            for booking in non_cancelled
+            if (_as_utc(booking.starts_at) or now) <= now and booking.status == "checked_in"
         ]
-        lifetime_count = len(past_attended)
+        if attended:
+            activity.first_visit_at = attended[0].starts_at
+        lifetime_count = len(attended)
         activity.lifetime_visits_baseline = lifetime_count
         activity.lifetime_visits_baseline_as_of = now
         activity.total_visits = lifetime_count + (activity.lifetime_visits_increment or 0)
 
-        checked_in = [
-            booking
-            for booking in bookings
-            if booking.status == "checked_in" and (_as_utc(booking.starts_at) or now) <= now
-        ]
-        if checked_in:
-            activity.last_checkin_at = checked_in[-1].starts_at
+        if attended:
+            activity.last_checkin_at = attended[-1].starts_at
 
         future_bookings = [
             booking
-            for booking in bookings
+            for booking in non_cancelled
             if (_as_utc(booking.starts_at) or now) >= now and booking.status in {"booked", "checked_in"}
         ]
         activity.next_booking_at = future_bookings[0].starts_at if future_bookings else None
@@ -971,18 +969,28 @@ def sync_roster_client_history(db: Session, *, day: date | None = None, max_clie
             return _finish_run(db, run, "completed", 0)
 
         processed = 0
+        failures: list[str] = []
         for client in clients:
-            rows = _read_member_booking_history_from_host_api(client.momence_member_id)
-            processed += _upsert_member_booking_history_rows(db, client, rows)
+            try:
+                rows = _read_member_booking_history_from_host_api(client.momence_member_id)
+                processed += _upsert_member_booking_history_rows(db, client, rows)
+            except Exception as exc:
+                failures.append(f"{client.momence_member_id}: {exc}")
 
         db.commit()
         preferences_processed = recompute_preferences_from_bookings(db)
         refresh_all_flags(db)
-        record_sync_state(db, "roster_history", status="completed", records_processed=processed)
+        record_sync_state(
+            db,
+            "roster_history",
+            status="completed" if not failures else "partial",
+            records_processed=processed,
+            error_text="; ".join(failures[:5]) if failures else None,
+        )
         record_sync_state(db, "behavior", status="completed", records_processed=preferences_processed)
         record_sync_state(db, "flags", status="completed", records_processed=processed)
         db.commit()
-        return _finish_run(db, run, "completed", processed)
+        return _finish_run(db, run, "completed" if not failures else "partial", processed, "; ".join(failures[:5]) if failures else None)
     except Exception as exc:  # pragma: no cover - targeted host api integration
         db.rollback()
         record_sync_state(db, "roster_history", status="failed", records_processed=0, error_text=str(exc))
