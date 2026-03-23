@@ -532,6 +532,18 @@ function matchesQuery(parts) {
   return parts.join(" ").toLowerCase().includes(state.query);
 }
 
+function normalizeLocationName(value) {
+  return (value || "").toLowerCase();
+}
+
+function matchesSelectedLocation(value) {
+  const normalized = normalizeLocationName(value);
+  if (!normalized) return true;
+  if (state.location === "emory") return normalized.includes("emory");
+  if (state.location === "west-midtown") return normalized.includes("west midtown") || normalized.includes("w. midtown");
+  return true;
+}
+
 function riskLevelClass(level, isNew = false) {
   if (isNew || !level) return "is-risk-new";
   if (level === "high") return "is-risk-high";
@@ -594,8 +606,8 @@ function buildAlertModel(person, item) {
 
 function renderFrontdesk() {
   const cards = currentData.frontdesk.filter((item) => {
-    const person = getPerson(item.id);
-    return matchesQuery([person.name, item.arrival, person.membership, item.notes.join(" ")]);
+      const person = getPerson(item.id);
+    return matchesSelectedLocation(item.location) && matchesQuery([person.name, item.arrival, person.membership, item.notes.join(" "), item.location || ""]);
   });
 
   frontdeskGrid.style.gridTemplateColumns =
@@ -694,10 +706,16 @@ function renderFrontdesk() {
 }
 
 function renderSessions() {
-  const sessions = currentData.sessions.filter((session) =>
-    matchesQuery([session.title, session.time, session.instructor, session.roster.map((item) => getPerson(item.personId).name).join(" ")]),
+  const sessions = currentData.sessions.filter(
+    (session) =>
+      matchesSelectedLocation(session.location) &&
+      matchesQuery([session.title, session.time, session.instructor, session.location, session.roster.map((item) => getPerson(item.personId).name).join(" ")]),
   );
   liveDayNote.textContent = `Highlights stay visible on the roster for ${currentDayLabel()}, and the rest of the client summary expands downward right inside each card.`;
+
+  if (!sessions.some((session) => session.id === state.selectedSessionId)) {
+    state.selectedSessionId = sessions[0]?.id || "";
+  }
 
   sessionList.innerHTML = `
     <div class="session-stack">
@@ -1011,6 +1029,7 @@ document.querySelectorAll(".toggle").forEach((button) => {
 locationButtons.forEach((button) => {
   button.addEventListener("click", () => {
     state.location = button.dataset.location;
+    state.selectedSessionId = "";
     render();
   });
 });

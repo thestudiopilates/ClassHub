@@ -48,6 +48,16 @@ def _risk_rank(level: str | None) -> int:
     return 0
 
 
+def _canonical_lifetime_visits(activity: ClientActivity | None) -> int:
+    if activity is None:
+        return 0
+
+    baseline_total = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
+    fallback_total = activity.total_visits or 0
+    rolling_floor = (activity.visits_last_30d or 0) + (activity.visits_previous_30d or 0)
+    return max(baseline_total, fallback_total, rolling_floor)
+
+
 def _slug_client(client: Client) -> str:
     return client.momence_member_id
 
@@ -232,8 +242,9 @@ def _profile_details(client: Client, churn_level: str, current_reason: str) -> l
         [item for item in (preferences.favorite_instructors or "").split("|") if item] if preferences else []
     )
     favorite_formats = [item for item in (preferences.favorite_formats or "").split("|") if item] if preferences else []
+    lifetime_visits = _canonical_lifetime_visits(activity)
     details: list[dict[str, str]] = [
-        {"label": "Lifetime classes", "value": str(activity.total_visits) if activity else "0"},
+        {"label": "Lifetime classes", "value": str(lifetime_visits)},
         {"label": "Last 30 days", "value": str(activity.visits_last_30d) if activity else "0"},
         {"label": "Previous 30 days", "value": str(activity.visits_previous_30d) if activity else "0"},
         {"label": "How heard about us", "value": profile_data.heard_about_us if profile_data and profile_data.heard_about_us else "Unknown"},
@@ -307,14 +318,16 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
         notes.append(client.profile_data.fun_fact)
     if not notes:
         notes = ["Active client", "Warm check-in opportunity"]
+    lifetime_visits = _canonical_lifetime_visits(client.activity)
     return {
         "id": _slug_client(client),
         "arrival": arrival,
+        "location": booking.location_name if booking is not None else None,
         "bookingId": booking.momence_booking_id if booking is not None else None,
         "checkedIn": booking.status == "checked_in" if booking is not None else False,
         "notes": notes[:3],
         "metrics": [
-            {"label": "Lifetime", "value": str(client.activity.total_visits if client.activity else 0)},
+            {"label": "Lifetime", "value": str(lifetime_visits)},
             {"label": "Last 30", "value": str(client.activity.visits_last_30d if client.activity else 0)},
             {"label": "Prev 30", "value": str(client.activity.visits_previous_30d if client.activity else 0)},
             {"label": "Last seen", "value": _format_date_label(client.activity.last_checkin_at if client.activity else None)},
@@ -344,6 +357,7 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         if client.preferences
         else []
     )
+    lifetime_visits = _canonical_lifetime_visits(client.activity)
     return {
         "personId": _slug_client(client),
         "bookingId": booking.momence_booking_id if booking is not None else None,
@@ -351,7 +365,7 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         "badges": _build_badges(client, flags_summary),
         "visibleHighlights": visible_highlights[:2],
         "stats": [
-            {"label": "Lifetime", "value": str(client.activity.total_visits if client.activity else 0)},
+            {"label": "Lifetime", "value": str(lifetime_visits)},
             {"label": "Last 30", "value": str(client.activity.visits_last_30d if client.activity else 0)},
             {"label": "Prev 30", "value": str(client.activity.visits_previous_30d if client.activity else 0)},
             {"label": "Risk", "value": (flags_summary.churn_risk or ("new" if flags_summary.new_client else "low")).title()},
