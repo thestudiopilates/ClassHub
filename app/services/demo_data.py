@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import case, desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Booking, Client, ClientFlag, Milestone
+from app.db.models import Booking, Client, ClientActivity, ClientFlag, Milestone
 from app.services.client_intelligence import (
     VISIT_MILESTONES,
     as_utc as _as_utc,
@@ -17,9 +17,11 @@ from app.services.client_intelligence import (
     booking_as_local as _booking_as_local,
     canonical_client_lifetime_visits as _canonical_client_lifetime_visits,
     canonical_visit_windows as _canonical_visit_windows,
+    filter_relevant_bookings as _filter_relevant_bookings,
     normalize_format_label as _normalize_format_label,
     normalize_instructor_key as _normalize_instructor_key,
     normalize_text_label as _normalize_preference_label,
+    prefer_official_bookings as _prefer_official_bookings,
 )
 from app.services.domain import build_client_profile, build_flag_summary, build_milestones
 from app.services.sync_state import get_freshness_map
@@ -226,39 +228,6 @@ def _resolve_demo_day(db: Session, requested_day: date | None) -> date:
         return _as_local(latest_start).date()
 
     return current_day
-
-
-def _prefer_official_bookings(bookings: list[Booking]) -> list[Booking]:
-    if any(booking.ends_at is not None for booking in bookings):
-        return [booking for booking in bookings if booking.ends_at is not None]
-    return bookings
-
-
-def _filter_relevant_bookings(bookings: list[Booking], day: date) -> list[Booking]:
-    if not bookings:
-        return bookings
-
-    local_now = datetime.now(LOCAL_TZ)
-    if day != local_now.date():
-        return bookings
-
-    relevant: list[Booking] = []
-    for booking in bookings:
-        starts_local = _booking_as_local(booking.starts_at)
-        if starts_local is None:
-            continue
-
-        ends_local = _booking_as_local(booking.ends_at)
-        if ends_local is None:
-            ends_local = starts_local + timedelta(minutes=75)
-
-        # Keep classes that are still in progress or about to happen.
-        if ends_local >= local_now:
-            relevant.append(booking)
-
-    return relevant
-
-
 def _churn_reason(client: Client, flags_summary) -> tuple[str, str]:
     activity = client.activity
     current_30, previous_30 = _canonical_visit_windows(client)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import re
 from zoneinfo import ZoneInfo
 
@@ -99,3 +99,37 @@ def normalize_instructor_key(value: str | None) -> str | None:
     if not label:
         return None
     return re.sub(r"[^a-z0-9]+", "", label.casefold())
+
+
+def prefer_official_bookings(bookings: list[Booking]) -> list[Booking]:
+    if any(booking.ends_at is not None for booking in bookings):
+        return [booking for booking in bookings if booking.ends_at is not None]
+    return bookings
+
+
+def filter_relevant_bookings(
+    bookings: list[Booking],
+    day: date,
+    *,
+    now_local: datetime | None = None,
+    tz_name: str = "America/New_York",
+    default_duration_minutes: int = 75,
+) -> list[Booking]:
+    if not bookings:
+        return bookings
+
+    local_now = now_local or datetime.now(ZoneInfo(tz_name))
+    if day != local_now.date():
+        return bookings
+
+    relevant: list[Booking] = []
+    for booking in bookings:
+        starts_local = booking_as_local(booking.starts_at, tz_name)
+        if starts_local is None:
+            continue
+        ends_local = booking_as_local(booking.ends_at, tz_name)
+        if ends_local is None:
+            ends_local = starts_local + timedelta(minutes=default_duration_minutes)
+        if ends_local >= local_now:
+            relevant.append(booking)
+    return relevant

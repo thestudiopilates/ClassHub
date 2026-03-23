@@ -29,6 +29,10 @@ from app.services.client_intelligence import (
     as_utc as _as_utc,
     canonical_client_lifetime_visits,
     canonical_visit_windows,
+    filter_relevant_bookings,
+    normalize_format_label,
+    normalize_text_label,
+    prefer_official_bookings,
 )
 from app.services.sync_state import get_freshness_map
 
@@ -41,10 +45,6 @@ def _local_day_bounds(day: date) -> tuple[datetime, datetime]:
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 
-def _prefer_official_bookings(bookings: list[Booking]) -> list[Booking]:
-    if any(booking.ends_at is not None for booking in bookings):
-        return [booking for booking in bookings if booking.ends_at is not None]
-    return bookings
 def _visit_counts(client: Client, now: datetime) -> tuple[int, int, int]:
     lifetime = canonical_client_lifetime_visits(client, now)
     current, previous = canonical_visit_windows(client, now)
@@ -208,8 +208,12 @@ def build_preferences_summary(client: Client) -> PreferencesSummary:
     return PreferencesSummary(
         favorite_time_of_day=preferences.favorite_time_of_day,
         favorite_weekdays=[item for item in (preferences.favorite_weekdays or "").split("|") if item],
-        favorite_instructors=[item for item in (preferences.favorite_instructors or "").split("|") if item],
-        favorite_formats=[item for item in (preferences.favorite_formats or "").split("|") if item],
+        favorite_instructors=[
+            item for raw in (preferences.favorite_instructors or "").split("|") if (item := normalize_text_label(raw))
+        ],
+        favorite_formats=[
+            item for raw in (preferences.favorite_formats or "").split("|") if (item := normalize_format_label(raw))
+        ],
         preference_basis=preferences.preference_basis,
     )
 
@@ -279,7 +283,8 @@ def get_front_desk_view(db: Session, day: date, location_name: str | None) -> Fr
     stmt = select(Booking).where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
     if location_name:
         stmt = stmt.where(Booking.location_name == location_name)
-    bookings = _prefer_official_bookings(db.scalars(stmt.order_by(Booking.starts_at)).all())
+    bookings = prefer_official_bookings(db.scalars(stmt.order_by(Booking.starts_at)).all())
+    bookings = filter_relevant_bookings(bookings, day)
 
     client_ids = {booking.client_id for booking in bookings}
     clients_stmt = (
