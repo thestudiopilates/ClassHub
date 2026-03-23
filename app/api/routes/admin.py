@@ -19,6 +19,7 @@ from app.schemas import (
 )
 from app.services.momence.token_store import save_tokens
 from app.services.domain import refresh_all_flags
+from app.services.sync_state import record_sync_state
 from app.services.sync.jobs import (
     get_booking_history_progress,
     refresh_clients_by_member_ids,
@@ -156,6 +157,9 @@ def debug_import_momence_tokens(request: MomenceTokenImportRequest) -> dict:
 def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db)) -> SeedImportResponse:
     imported_clients = 0
     imported_notes = 0
+    imported_profile_rows = 0
+    imported_preference_rows = 0
+    imported_birthdays = 0
     for item in request.clients:
         client = db.query(Client).filter(Client.momence_member_id == item.member_id).one_or_none()
         if client is None:
@@ -169,6 +173,8 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
         client.source_updated_at = item.source_updated_at
         db.add(client)
         db.flush()
+        if item.birthday is not None:
+            imported_birthdays += 1
 
         if item.activity is not None:
             activity = client.activity or ClientActivity(client_id=client.id)
@@ -193,6 +199,7 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
             profile.pregnancy_due_date = item.profile_data.pregnancy_due_date
             profile.heard_about_us = item.profile_data.heard_about_us
             db.add(profile)
+            imported_profile_rows += 1
 
         if item.preferences is not None:
             pref = client.preferences or ClientPreference(client_id=client.id)
@@ -202,6 +209,7 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
             pref.favorite_formats = item.preferences.favorite_formats
             pref.preference_basis = item.preferences.preference_basis
             db.add(pref)
+            imported_preference_rows += 1
 
         if item.notes:
             db.query(ClientNote).filter(ClientNote.client_id == client.id).delete()
@@ -222,10 +230,21 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
         imported_clients += 1
 
     db.commit()
+    record_sync_state(db, "active_customers", status="completed", records_processed=imported_clients)
+    if imported_birthdays:
+        record_sync_state(db, "birthdays", status="completed", records_processed=imported_birthdays)
+    if imported_profile_rows:
+        record_sync_state(db, "customer_fields", status="completed", records_processed=imported_profile_rows)
+    if imported_preference_rows:
+        record_sync_state(db, "behavior", status="completed", records_processed=imported_preference_rows)
+    if imported_notes:
+        record_sync_state(db, "memberships_notes", status="completed", records_processed=imported_notes)
     recomputed = False
     if request.recompute_flags:
         refresh_all_flags(db)
+        record_sync_state(db, "flags", status="completed", records_processed=imported_clients)
         recomputed = True
+    db.commit()
     return SeedImportResponse(
         imported_clients=imported_clients,
         imported_notes=imported_notes,
