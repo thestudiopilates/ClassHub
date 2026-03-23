@@ -907,7 +907,7 @@ function renderSessions() {
                     .join("")}
                 </div>
                 <div class="expand-row">
-                  <span class="expand-summary">Teaching cues, service assumptions, and risk rules</span>
+                  <span class="expand-summary">Concierge brief</span>
                   <button class="expand-button" type="button" data-expand-id="${entry.personId}">
                     <span>${expanded ? "▾" : "▸"}</span>
                     <span>${expanded ? "Hide Full Profile" : "See Full Profile"}</span>
@@ -916,20 +916,16 @@ function renderSessions() {
                 <div class="expand-details">
                   <div class="expand-grid">
                     <div class="assumption-card">
-                      <strong>Assumption</strong>
-                      <p>${entry.expand.assumption}</p>
+                      <strong>Today matters</strong>
+                      <p>${alertModel.primary ? `${alertModel.primary.label}: ${alertModel.primary.text}` : entry.visibleHighlights?.[0]?.value || "Warm, personal service will likely land best."}</p>
                     </div>
                     <div class="service-card">
                       <strong>Team move</strong>
                       <p>${entry.expand.service}</p>
                     </div>
                     <div class="assumption-card">
-                      <strong>Risk rule</strong>
-                      <p>${person.churnRisk.rule}</p>
-                    </div>
-                    <div class="assumption-card">
                       <strong>Client read</strong>
-                      <p>${person.profile.subtext}</p>
+                      <p>${entry.expand.assumption}</p>
                     </div>
                   </div>
                   <div class="breakdown-grid">
@@ -948,7 +944,19 @@ function renderSessions() {
                   </div>
                   <div class="inline-detail-grid">
                     ${person.profile.details
-                      .filter((detail) => !["Fun fact", "Preferred instructor", "Preferred format"].includes(detail.label))
+                      .filter(
+                        (detail) =>
+                          ![
+                            "Fun fact",
+                            "Preferred instructor",
+                            "Preferred format",
+                            "Membership",
+                            "Churn risk",
+                            "Lifetime classes",
+                            "Last 30 days",
+                            "Previous 30 days",
+                          ].includes(detail.label),
+                      )
                       .map(
                         (detail) => `
                           <div class="detail-item ${detailTone(detail.label)}">
