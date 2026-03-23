@@ -811,6 +811,16 @@ def _recompute_client_activity_from_bookings(db: Session, client: Client, now: d
         activity.first_visit_at = bookings[0].starts_at
         activity.last_booking_at = bookings[-1].starts_at
 
+        past_attended = [
+            booking
+            for booking in bookings
+            if (_as_utc(booking.starts_at) or now) <= now and booking.status != "cancelled"
+        ]
+        lifetime_count = len(past_attended)
+        activity.lifetime_visits_baseline = lifetime_count
+        activity.lifetime_visits_baseline_as_of = now
+        activity.total_visits = lifetime_count + (activity.lifetime_visits_increment or 0)
+
         checked_in = [
             booking
             for booking in bookings
