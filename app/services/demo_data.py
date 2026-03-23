@@ -126,11 +126,11 @@ def _filter_relevant_bookings(bookings: list[Booking], day: date) -> list[Bookin
 
     relevant: list[Booking] = []
     for booking in bookings:
-        starts_local = _as_local(booking.starts_at)
+        starts_local = _booking_as_local(booking.starts_at)
         if starts_local is None:
             continue
 
-        ends_local = _as_local(booking.ends_at)
+        ends_local = _booking_as_local(booking.ends_at)
         if ends_local is None:
             ends_local = starts_local + timedelta(minutes=75)
 
