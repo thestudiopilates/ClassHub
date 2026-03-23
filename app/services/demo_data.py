@@ -83,6 +83,11 @@ def _active_membership_label(client: Client) -> str | None:
     memberships = _active_memberships(client)
     if memberships:
         return memberships[0].membership_name or "Active membership"
+    if client.memberships:
+        memberships = sorted(client.memberships, key=_membership_sort_key, reverse=True)
+        first = memberships[0]
+        if first.membership_name:
+            return first.membership_name
     if client.activity and client.activity.active_membership_name:
         return client.activity.active_membership_name
     return None
