@@ -83,6 +83,9 @@ def _canonical_client_lifetime_visits(client: Client, now: datetime | None = Non
 def _canonical_visit_windows(client: Client, now: datetime | None = None) -> tuple[int, int]:
     reference = now or datetime.now(timezone.utc)
     attended = _attended_bookings(client, reference)
+    activity = client.activity
+    activity_current = activity.visits_last_30d if activity else 0
+    activity_previous = activity.visits_previous_30d if activity else 0
     if attended:
         current_start = reference - timedelta(days=30)
         previous_start = reference - timedelta(days=60)
@@ -92,11 +95,10 @@ def _canonical_visit_windows(client: Client, now: datetime | None = None) -> tup
             for booking in attended
             if previous_start <= (_as_utc(booking.starts_at) or reference) < current_start
         )
-        return current, previous
-    activity = client.activity
+        return max(current, activity_current or 0), max(previous, activity_previous or 0)
     if activity is None:
         return 0, 0
-    return activity.visits_last_30d or 0, activity.visits_previous_30d or 0
+    return activity_current or 0, activity_previous or 0
 
 
 def _join_date_label(client: Client) -> str:

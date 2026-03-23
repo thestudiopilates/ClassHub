@@ -65,6 +65,16 @@ def _attended_bookings(client: Client, now: datetime) -> list[Booking]:
 
 def _visit_counts(client: Client, now: datetime) -> tuple[int, int, int]:
     attended = _attended_bookings(client, now)
+    activity = client.activity
+    activity_lifetime = 0
+    activity_current = 0
+    activity_previous = 0
+    if activity is not None:
+        activity_lifetime = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
+        if activity_lifetime == 0:
+            activity_lifetime = activity.total_visits or 0
+        activity_current = activity.visits_last_30d or 0
+        activity_previous = activity.visits_previous_30d or 0
     if attended:
         current_start = now - timedelta(days=30)
         previous_start = now - timedelta(days=60)
@@ -75,15 +85,11 @@ def _visit_counts(client: Client, now: datetime) -> tuple[int, int, int]:
             for booking in attended
             if previous_start <= (_as_utc(booking.starts_at) or now) < current_start
         )
-        return lifetime, current, previous
+        return max(lifetime, activity_lifetime), max(current, activity_current), max(previous, activity_previous)
 
-    activity = client.activity
     if activity is None:
         return 0, 0, 0
-    lifetime = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
-    if lifetime == 0:
-        lifetime = activity.total_visits or 0
-    return lifetime, activity.visits_last_30d or 0, activity.visits_previous_30d or 0
+    return activity_lifetime, activity_current, activity_previous
 
 
 def compute_is_active_180d(activity: ClientActivity | None, now: datetime) -> bool:
