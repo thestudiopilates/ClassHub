@@ -59,7 +59,31 @@ def _canonical_lifetime_visits(activity: ClientActivity | None) -> int:
     return max(baseline_total, fallback_total, rolling_floor)
 
 
+def _attended_bookings(client: Client, now: datetime | None = None) -> list[Booking]:
+    reference = now or datetime.now(timezone.utc)
+    attended: list[Booking] = []
+    for booking in client.bookings:
+        starts_at = _as_utc(booking.starts_at)
+        if starts_at is None or starts_at > reference:
+            continue
+        if booking.status != "checked_in":
+            continue
+        attended.append(booking)
+    attended.sort(key=lambda item: _as_utc(item.starts_at) or reference)
+    return attended
+
+
+def _canonical_client_lifetime_visits(client: Client, now: datetime | None = None) -> int:
+    attended = _attended_bookings(client, now)
+    if attended:
+        return len(attended)
+    return _canonical_lifetime_visits(client.activity)
+
+
 def _join_date_label(client: Client) -> str:
+    attended = _attended_bookings(client)
+    if attended:
+        return _booking_as_local(attended[0].starts_at).strftime("%b %-d, %Y")
     activity = client.activity
     if activity is None or activity.first_visit_at is None:
         return "Join date still loading"
@@ -136,7 +160,7 @@ def _membership_expiration_context(client: Client) -> str | None:
 def _booking_class_number_today(client: Client, booking: Booking | None, now: datetime) -> int | None:
     if booking is None:
         return None
-    base_lifetime = _canonical_lifetime_visits(client.activity)
+    base_lifetime = _canonical_client_lifetime_visits(client, now)
     booking_day = _booking_as_local(booking.starts_at).date() if booking.starts_at else None
     if booking_day is None:
         return None
@@ -353,7 +377,7 @@ def _profile_details(client: Client, churn_level: str, current_reason: str) -> l
         [item for item in (preferences.favorite_instructors or "").split("|") if item] if preferences else []
     )
     favorite_formats = [item for item in (preferences.favorite_formats or "").split("|") if item] if preferences else []
-    lifetime_visits = _canonical_lifetime_visits(activity)
+    lifetime_visits = _canonical_client_lifetime_visits(client)
     active_membership_name = _active_membership_label(client)
     details: list[dict[str, str]] = [
         {"label": "Lifetime classes", "value": str(lifetime_visits)},
@@ -583,7 +607,7 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
         notes.append("First visit back after a gap")
     if not notes:
         notes = ["Active client", "Warm check-in opportunity"]
-    lifetime_visits = _canonical_lifetime_visits(client.activity)
+    lifetime_visits = _canonical_client_lifetime_visits(client, now)
     return {
         "id": _slug_client(client),
         "arrival": arrival,
@@ -625,7 +649,7 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         if client.preferences
         else []
     )
-    lifetime_visits = _canonical_lifetime_visits(client.activity)
+    lifetime_visits = _canonical_client_lifetime_visits(client, now)
     return {
         "personId": _slug_client(client),
         "bookingId": booking.momence_booking_id if booking is not None else None,
