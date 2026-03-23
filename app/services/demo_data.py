@@ -476,6 +476,13 @@ def _normalize_format_label(value: str | None) -> str | None:
     return " ".join(label.split()).strip()
 
 
+def _normalize_instructor_key(value: str | None) -> str | None:
+    label = _normalize_preference_label(value)
+    if not label:
+        return None
+    return re.sub(r"[^a-z0-9]+", "", label.casefold())
+
+
 def _membership_fit_summary(client: Client) -> dict[str, str]:
     membership_name = _active_membership_label(client)
     if not membership_name:
@@ -617,6 +624,7 @@ def _membership_history_lines(client: Client) -> list[str]:
 def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
     history = _history_bookings(client, now)
     instructor_counts: Counter[str] = Counter()
+    instructor_labels: dict[str, Counter[str]] = defaultdict(Counter)
     weekday_counts: Counter[str] = Counter()
     format_counts: Counter[str] = Counter()
 
@@ -624,7 +632,10 @@ def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
         instructor_name = _normalize_preference_label(booking.instructor_name)
         class_name = _normalize_format_label(booking.class_name)
         if instructor_name:
-            instructor_counts[instructor_name] += 1
+            instructor_key = _normalize_instructor_key(instructor_name)
+            if instructor_key:
+                instructor_counts[instructor_key] += 1
+                instructor_labels[instructor_key][instructor_name] += 1
         if class_name:
             format_counts[class_name] += 1
         starts_local = _booking_as_local(booking.starts_at)
@@ -632,10 +643,15 @@ def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
             weekday_counts[starts_local.strftime("%A")] += 1
 
     membership_fit = _membership_fit_summary(client)
+    instructor_lines = (
+        [f"{instructor_labels[key].most_common(1)[0][0]} ({count})" for key, count in instructor_counts.most_common(3)]
+        if instructor_counts
+        else ["Still learning"]
+    )
     return [
         {
             "title": "Visits by instructor",
-            "items": _top_count_lines(instructor_counts),
+            "items": instructor_lines,
         },
         {
             "title": "Visits by weekday",

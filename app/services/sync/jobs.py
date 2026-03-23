@@ -1214,11 +1214,32 @@ def _normalize_format_label(value: str | None) -> str | None:
     return " ".join(label.split()).strip()
 
 
+def _normalize_instructor_key(value: str | None) -> str | None:
+    if not value:
+        return None
+    label = " ".join(str(value).split()).strip()
+    if not label:
+        return None
+    return re.sub(r"[^a-z0-9]+", "", label.casefold())
+
+
+def _best_display_labels(counter: Counter[str], display_map: dict[str, Counter[str]], *, limit: int = 3) -> list[str]:
+    labels: list[str] = []
+    for key, _ in counter.most_common(limit):
+        displays = display_map.get(key)
+        if displays:
+            labels.append(displays.most_common(1)[0][0])
+        else:
+            labels.append(key)
+    return labels
+
+
 def _apply_session_booking_rows(db: Session, rows: list[dict[str, str]]) -> int:
     stats: dict[str, dict[str, Counter]] = defaultdict(
         lambda: {
             "formats": Counter(),
             "instructors": Counter(),
+            "instructor_labels": defaultdict(Counter),
             "weekdays": Counter(),
             "times": Counter(),
         }
@@ -1240,7 +1261,11 @@ def _apply_session_booking_rows(db: Session, rows: list[dict[str, str]]) -> int:
             if normalized_format:
                 stats[email]["formats"][normalized_format] += 1
         if instructor_key and row.get(instructor_key):
-            stats[email]["instructors"][row[instructor_key]] += 1
+            instructor_label = " ".join(str(row[instructor_key]).split()).strip()
+            normalized_instructor = _normalize_instructor_key(instructor_label)
+            if normalized_instructor:
+                stats[email]["instructors"][normalized_instructor] += 1
+                stats[email]["instructor_labels"][normalized_instructor][instructor_label] += 1
         if start_key and row.get(start_key):
             parsed = _try_parse_report_datetime(row[start_key])
             if parsed:
@@ -1264,7 +1289,9 @@ def _apply_session_booking_rows(db: Session, rows: list[dict[str, str]]) -> int:
 
             preference = ClientPreference(client_id=client.id)
         preference.favorite_formats = "|".join(name for name, _ in counters["formats"].most_common(3))
-        preference.favorite_instructors = "|".join(name for name, _ in counters["instructors"].most_common(3))
+        preference.favorite_instructors = "|".join(
+            _best_display_labels(counters["instructors"], counters["instructor_labels"], limit=3)
+        )
         preference.favorite_weekdays = "|".join(name for name, _ in counters["weekdays"].most_common(3))
         preference.favorite_time_of_day = (
             counters["times"].most_common(1)[0][0] if counters["times"] else None
@@ -1291,6 +1318,7 @@ def recompute_preferences_from_bookings(db: Session, *, lookback_days: int = 180
         lambda: {
             "formats": Counter(),
             "instructors": Counter(),
+            "instructor_labels": defaultdict(Counter),
             "weekdays": Counter(),
             "times": Counter(),
         }
@@ -1304,8 +1332,11 @@ def recompute_preferences_from_bookings(db: Session, *, lookback_days: int = 180
         normalized_format = _normalize_format_label(booking.class_name)
         if normalized_format:
             client_stats["formats"][normalized_format] += 1
-        if booking.instructor_name:
-            client_stats["instructors"][booking.instructor_name] += 1
+        instructor_label = " ".join((booking.instructor_name or "").split()).strip()
+        normalized_instructor = _normalize_instructor_key(instructor_label)
+        if normalized_instructor:
+            client_stats["instructors"][normalized_instructor] += 1
+            client_stats["instructor_labels"][normalized_instructor][instructor_label] += 1
         client_stats["weekdays"][starts_at.strftime("%A")] += 1
         local_hour = starts_at.astimezone(LOCAL_TZ).hour
         if local_hour < 11:
@@ -1351,7 +1382,9 @@ def recompute_preferences_from_bookings(db: Session, *, lookback_days: int = 180
                 "client_id": client_id.hex if hasattr(client_id, "hex") else str(client_id).replace("-", ""),
                 "favorite_time_of_day": counters["times"].most_common(1)[0][0] if counters["times"] else None,
                 "favorite_weekdays": "|".join(name for name, _ in counters["weekdays"].most_common(3)),
-                "favorite_instructors": "|".join(name for name, _ in counters["instructors"].most_common(3)),
+                "favorite_instructors": "|".join(
+                    _best_display_labels(counters["instructors"], counters["instructor_labels"], limit=3)
+                ),
                 "favorite_formats": "|".join(name for name, _ in counters["formats"].most_common(3)),
                 "preference_basis": "booking_history",
                 "computed_at": now,
