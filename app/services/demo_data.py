@@ -80,6 +80,25 @@ def _canonical_client_lifetime_visits(client: Client, now: datetime | None = Non
     return _canonical_lifetime_visits(client.activity)
 
 
+def _canonical_visit_windows(client: Client, now: datetime | None = None) -> tuple[int, int]:
+    reference = now or datetime.now(timezone.utc)
+    attended = _attended_bookings(client, reference)
+    if attended:
+        current_start = reference - timedelta(days=30)
+        previous_start = reference - timedelta(days=60)
+        current = sum(1 for booking in attended if (_as_utc(booking.starts_at) or reference) >= current_start)
+        previous = sum(
+            1
+            for booking in attended
+            if previous_start <= (_as_utc(booking.starts_at) or reference) < current_start
+        )
+        return current, previous
+    activity = client.activity
+    if activity is None:
+        return 0, 0
+    return activity.visits_last_30d or 0, activity.visits_previous_30d or 0
+
+
 def _join_date_label(client: Client) -> str:
     attended = _attended_bookings(client)
     if attended:
@@ -288,8 +307,7 @@ def _filter_relevant_bookings(bookings: list[Booking], day: date) -> list[Bookin
 
 def _churn_reason(client: Client, flags_summary) -> tuple[str, str]:
     activity = client.activity
-    current_30 = activity.visits_last_30d if activity else 0
-    previous_30 = activity.visits_previous_30d if activity else 0
+    current_30, previous_30 = _canonical_visit_windows(client)
     if flags_summary.new_client:
         return (
             "New client with an early visit pattern still forming.",
@@ -380,12 +398,13 @@ def _profile_details(client: Client, churn_level: str, current_reason: str) -> l
     )
     favorite_formats = [item for item in (preferences.favorite_formats or "").split("|") if item] if preferences else []
     lifetime_visits = _canonical_client_lifetime_visits(client)
+    current_30, previous_30 = _canonical_visit_windows(client)
     active_membership_name = _active_membership_label(client)
     details: list[dict[str, str]] = [
         {"label": "Lifetime classes", "value": str(lifetime_visits)},
         {"label": "With us since", "value": _join_date_label(client)},
-        {"label": "Last 30 days", "value": str(activity.visits_last_30d) if activity else "0"},
-        {"label": "Previous 30 days", "value": str(activity.visits_previous_30d) if activity else "0"},
+        {"label": "Last 30 days", "value": str(current_30)},
+        {"label": "Previous 30 days", "value": str(previous_30)},
         {"label": "How heard about us", "value": profile_data.heard_about_us if profile_data and profile_data.heard_about_us else "Unknown"},
         {"label": "Fun fact", "value": profile_data.fun_fact if profile_data and profile_data.fun_fact else "Not collected yet"},
         {
@@ -428,7 +447,6 @@ def _top_count_lines(counter: Counter[str], *, limit: int = 3) -> list[str]:
 
 
 def _membership_fit_summary(client: Client) -> dict[str, str]:
-    activity = client.activity
     membership_name = _active_membership_label(client)
     if not membership_name:
         return {
@@ -437,7 +455,7 @@ def _membership_fit_summary(client: Client) -> dict[str, str]:
             "note": "Use recent attendance to suggest the best next option.",
         }
 
-    visits_last_30 = activity.visits_last_30d if activity else 0
+    visits_last_30, _ = _canonical_visit_windows(client)
     normalized = membership_name.lower()
     expiration = _membership_expiration_context(client)
 
@@ -611,6 +629,7 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
     if not notes:
         notes = ["Active client", "Warm check-in opportunity"]
     lifetime_visits = _canonical_client_lifetime_visits(client, now)
+    current_30, previous_30 = _canonical_visit_windows(client, now)
     return {
         "id": _slug_client(client),
         "arrival": arrival,
@@ -620,8 +639,8 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
         "notes": notes[:3],
         "metrics": [
             {"label": "Lifetime", "value": str(lifetime_visits)},
-            {"label": "Last 30", "value": str(client.activity.visits_last_30d if client.activity else 0)},
-            {"label": "Prev 30", "value": str(client.activity.visits_previous_30d if client.activity else 0)},
+            {"label": "Last 30", "value": str(current_30)},
+            {"label": "Prev 30", "value": str(previous_30)},
             {"label": "Last seen", "value": _format_date_label(client.activity.last_checkin_at if client.activity else None)},
         ],
         "badges": _build_badges(client, flags_summary),
@@ -654,6 +673,7 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         else []
     )
     lifetime_visits = _canonical_client_lifetime_visits(client, now)
+    current_30, previous_30 = _canonical_visit_windows(client, now)
     return {
         "personId": _slug_client(client),
         "bookingId": booking.momence_booking_id if booking is not None else None,
@@ -666,8 +686,8 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         "visibleHighlights": visible_highlights[:2],
         "stats": [
             {"label": "Lifetime", "value": str(lifetime_visits)},
-            {"label": "Last 30", "value": str(client.activity.visits_last_30d if client.activity else 0)},
-            {"label": "Prev 30", "value": str(client.activity.visits_previous_30d if client.activity else 0)},
+            {"label": "Last 30", "value": str(current_30)},
+            {"label": "Prev 30", "value": str(previous_30)},
             {"label": "Risk", "value": (flags_summary.churn_risk or ("new" if flags_summary.new_client else "low")).title()},
         ],
         "expand": {

@@ -50,6 +50,42 @@ def _prefer_official_bookings(bookings: list[Booking]) -> list[Booking]:
     return bookings
 
 
+def _attended_bookings(client: Client, now: datetime) -> list[Booking]:
+    attended: list[Booking] = []
+    for booking in getattr(client, "bookings", []):
+        starts_at = _as_utc(booking.starts_at)
+        if starts_at is None or starts_at > now:
+            continue
+        if booking.status != "checked_in":
+            continue
+        attended.append(booking)
+    attended.sort(key=lambda item: _as_utc(item.starts_at) or now)
+    return attended
+
+
+def _visit_counts(client: Client, now: datetime) -> tuple[int, int, int]:
+    attended = _attended_bookings(client, now)
+    if attended:
+        current_start = now - timedelta(days=30)
+        previous_start = now - timedelta(days=60)
+        lifetime = len(attended)
+        current = sum(1 for booking in attended if (_as_utc(booking.starts_at) or now) >= current_start)
+        previous = sum(
+            1
+            for booking in attended
+            if previous_start <= (_as_utc(booking.starts_at) or now) < current_start
+        )
+        return lifetime, current, previous
+
+    activity = client.activity
+    if activity is None:
+        return 0, 0, 0
+    lifetime = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
+    if lifetime == 0:
+        lifetime = activity.total_visits or 0
+    return lifetime, activity.visits_last_30d or 0, activity.visits_previous_30d or 0
+
+
 def compute_is_active_180d(activity: ClientActivity | None, now: datetime) -> bool:
     if activity is None:
         return False
@@ -113,11 +149,7 @@ def build_flag_summary(client: Client, now: datetime) -> FlagsSummary:
     birthday_today, birthday_this_week = compute_birthday_flags(client.birthday, today)
     activity = client.activity
     injury = any(note.is_injury_flag for note in client.notes)
-    total_visits = 0
-    if activity:
-        total_visits = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
-        if total_visits == 0:
-            total_visits = activity.total_visits or 0
+    total_visits, current_30, previous_30 = _visit_counts(client, now)
     new_client = bool(activity and total_visits <= 1)
     welcome_back = False
     last_checkin_at = _as_utc(activity.last_checkin_at) if activity else None
@@ -131,7 +163,17 @@ def build_flag_summary(client: Client, now: datetime) -> FlagsSummary:
         injury=injury,
         welcome_back=welcome_back,
         new_client=new_client,
-        churn_risk=compute_churn_risk(activity, now),
+        churn_risk=(
+            "low"
+            if activity and (_as_utc(activity.next_booking_at) and _as_utc(activity.next_booking_at) >= now)
+            else (
+                "high"
+                if previous_30 > 0 and current_30 / previous_30 <= 0.5
+                else "medium"
+                if previous_30 > 0 and current_30 / previous_30 < 0.8
+                else compute_churn_risk(activity, now)
+            )
+        ),
     )
 
 
@@ -145,19 +187,18 @@ def build_membership_summary(client: Client) -> MembershipSummary:
 
 def build_activity_summary(client: Client) -> ActivitySummary:
     activity = client.activity
-    if activity is None:
+    if activity is None and not getattr(client, "bookings", None):
         return ActivitySummary()
-    total_visits = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
-    if total_visits == 0:
-        total_visits = activity.total_visits
+    now = datetime.now(timezone.utc)
+    total_visits, current_30, previous_30 = _visit_counts(client, now)
     return ActivitySummary(
-        last_checkin_at=activity.last_checkin_at,
-        last_booking_at=activity.last_booking_at,
-        next_booking_at=activity.next_booking_at,
+        last_checkin_at=activity.last_checkin_at if activity else None,
+        last_booking_at=activity.last_booking_at if activity else None,
+        next_booking_at=activity.next_booking_at if activity else None,
         total_visits=total_visits,
         lifetime_visits=total_visits,
-        visits_last_30d=activity.visits_last_30d,
-        visits_previous_30d=activity.visits_previous_30d,
+        visits_last_30d=current_30,
+        visits_previous_30d=previous_30,
     )
 
 
@@ -167,13 +208,8 @@ def build_milestones(client: Client, now: datetime) -> list[MilestoneSummary]:
         for item in client.milestones
         if item.is_current
     ]
-    activity = client.activity
-    total_visits = 0
-    if activity:
-        total_visits = (activity.lifetime_visits_baseline or 0) + (activity.lifetime_visits_increment or 0)
-        if total_visits == 0:
-            total_visits = activity.total_visits
-    if activity and total_visits in VISIT_MILESTONES:
+    total_visits, _, _ = _visit_counts(client, now)
+    if total_visits in VISIT_MILESTONES:
         milestones.append(
             MilestoneSummary(
                 type="visit_count",
@@ -242,6 +278,7 @@ def get_client_profile(db: Session, momence_member_id: str) -> ClientProfileResp
             selectinload(Client.activity),
             selectinload(Client.notes),
             selectinload(Client.milestones),
+            selectinload(Client.bookings),
             selectinload(Client.profile_data),
             selectinload(Client.preferences),
         )
@@ -283,7 +320,12 @@ def get_front_desk_view(db: Session, day: date, location_name: str | None) -> Fr
     clients_stmt = (
         select(Client)
         .where(Client.id.in_(client_ids))
-        .options(selectinload(Client.activity), selectinload(Client.notes), selectinload(Client.milestones))
+        .options(
+            selectinload(Client.activity),
+            selectinload(Client.notes),
+            selectinload(Client.milestones),
+            selectinload(Client.bookings),
+        )
     )
     clients = {client.id: client for client in db.scalars(clients_stmt).all()}
     now = datetime.now(timezone.utc)
@@ -321,7 +363,12 @@ def get_instructor_view(
     clients_stmt = (
         select(Client)
         .where(Client.id.in_(client_ids))
-        .options(selectinload(Client.activity), selectinload(Client.notes), selectinload(Client.milestones))
+        .options(
+            selectinload(Client.activity),
+            selectinload(Client.notes),
+            selectinload(Client.milestones),
+            selectinload(Client.bookings),
+        )
     )
     clients = {client.id: client for client in db.scalars(clients_stmt).all()}
     now = datetime.now(timezone.utc)
@@ -349,7 +396,7 @@ def get_instructor_view(
                     instructor_notes=[note.note_text for note in client.notes if note.is_instructor_flag or note.is_injury_flag],
                     new_client=flags.new_client,
                     welcome_back=flags.welcome_back,
-                    total_visits=client.activity.total_visits if client.activity else 0,
+                    total_visits=build_activity_summary(client).total_visits or 0,
                 )
             )
         sessions.append(
