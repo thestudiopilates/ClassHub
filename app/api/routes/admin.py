@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.services.automation import run_preopen_ops_sync
 from app.schemas import (
     BookingHistoryProgressResponse,
     BookingHistoryRunRequest,
@@ -25,6 +26,11 @@ from app.services.sync.jobs import (
 )
 
 router = APIRouter()
+
+
+@router.post("/sync/preopen")
+def run_preopen_sync(db: Session = Depends(get_db)) -> dict[str, SyncRunResponse]:
+    return run_preopen_ops_sync(db)
 
 
 @router.post("/sync/upcoming-bookings", response_model=SyncRunResponse)

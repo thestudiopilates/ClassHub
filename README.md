@@ -105,6 +105,8 @@ Suggested env on the sync service:
 - `OPS_AUTOMATION_MODE=preopen`
 - `OPS_TARGET_DAY=today`
 
+Full setup notes live in [DEPLOYMENT.md](/Users/kellyjackson/Documents/Codex/Customer%20Birthdays%20and%20Milestone%20/DEPLOYMENT.md).
+
 ## GitHub
 
 GitHub Actions CI is included at [.github/workflows/ci.yml](/Users/kellyjackson/Documents/Codex/Customer%20Birthdays%20and%20Milestone%20/.github/workflows/ci.yml).
