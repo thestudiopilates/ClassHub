@@ -687,9 +687,19 @@ def sync_upcoming_bookings(db: Session) -> SyncRunResponse:
             rows = _read_booking_rows()
             records_processed, impacted_member_ids = _upsert_upcoming_booking_rows(db, rows)
         db.commit()
-        if impacted_member_ids:
-            limited_member_ids = impacted_member_ids[: settings.momence_max_context_refresh_batch]
-            refresh_clients_by_member_ids(db, limited_member_ids)
+        if impacted_member_ids and settings.momence_browser_profile_dir.strip():
+            try:
+                limited_member_ids = impacted_member_ids[: settings.momence_max_context_refresh_batch]
+                refresh_clients_by_member_ids(db, limited_member_ids)
+            except Exception as exc:
+                record_sync_state(
+                    db,
+                    "memberships_notes",
+                    status="failed",
+                    records_processed=0,
+                    error_text=f"Optional enrichment skipped: {exc}",
+                )
+                db.commit()
         record_sync_state(db, "bookings", status="completed", records_processed=records_processed)
         return _finish_run(db, run, "completed", records_processed)
     except Exception as exc:  # pragma: no cover - scaffolding path
