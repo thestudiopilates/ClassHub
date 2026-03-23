@@ -188,19 +188,32 @@ def _is_credit_active(item: dict, now: datetime) -> bool:
     return False
 
 
-def _select_active_membership_name(memberships: dict, now: datetime) -> tuple[bool, str | None]:
-    subscriptions = memberships.get("subscriptions") or []
-    credits = memberships.get("creditsAndEvents") or []
-    netflix = memberships.get("netflixSubscriptions") or []
-    for collection, checker in (
-        (subscriptions, _is_subscription_active),
-        (credits, _is_credit_active),
-        (netflix, _is_subscription_active),
-    ):
+def _membership_collections(memberships: dict | list[dict]) -> list[tuple[str, list[dict]]]:
+    if isinstance(memberships, list):
+        grouped: dict[str, list[dict]] = defaultdict(list)
+        for item in memberships:
+            grouped[item.get("type") or "unknown"].append(item)
+        return list(grouped.items())
+
+    return [
+        ("subscription", memberships.get("subscriptions") or []),
+        ("credit", memberships.get("creditsAndEvents") or []),
+        ("subscription", memberships.get("netflixSubscriptions") or []),
+    ]
+
+
+def _membership_name(item: dict) -> str | None:
+    membership = item.get("membership") or {}
+    return item.get("membershipName") or membership.get("name")
+
+
+def _select_active_membership_name(memberships: dict | list[dict], now: datetime) -> tuple[bool, str | None]:
+    for membership_type, collection in _membership_collections(memberships):
+        checker = _is_subscription_active if membership_type == "subscription" else _is_credit_active
         active_items = [item for item in collection if checker(item, now)]
         active_items.sort(key=lambda item: _parse_iso_datetime(item.get("endDate")) or datetime.max.replace(tzinfo=timezone.utc))
         if active_items:
-            return True, active_items[0].get("membershipName")
+            return True, _membership_name(active_items[0])
     return False, None
 
 
@@ -213,14 +226,9 @@ def _safe_int(value) -> int | None:
         return None
 
 
-def _normalize_membership_rows(memberships: dict, now: datetime) -> list[dict]:
+def _normalize_membership_rows(memberships: dict | list[dict], now: datetime) -> list[dict]:
     rows: list[dict] = []
-    collections = (
-        ("subscription", memberships.get("subscriptions") or []),
-        ("credit", memberships.get("creditsAndEvents") or []),
-        ("subscription", memberships.get("netflixSubscriptions") or []),
-    )
-    for membership_type, items in collections:
+    for membership_type, items in _membership_collections(memberships):
         for item in items:
             source_id = item.get("id") or item.get("membershipId") or item.get("subscriptionId") or item.get("creditId")
             started_at = _parse_iso_datetime(item.get("startDate") or item.get("createdAt"))
@@ -237,7 +245,7 @@ def _normalize_membership_rows(memberships: dict, now: datetime) -> list[dict]:
             rows.append(
                 {
                     "source_membership_id": str(source_id) if source_id is not None else None,
-                    "membership_name": item.get("membershipName"),
+                    "membership_name": _membership_name(item),
                     "membership_type": membership_type,
                     "started_at": started_at,
                     "ended_at": ended_at,
@@ -725,20 +733,14 @@ def refresh_clients_by_member_ids(db: Session, momence_member_ids: list[str]) ->
         if missing:
             raise RuntimeError(f"Client ids not found locally: {', '.join(missing[:5])}")
 
-        browser = MomenceBrowserClient()
-        cookies = browser.get_authenticated_cookies()
         now = datetime.now(timezone.utc)
         records_processed = 0
-        with httpx.Client(
-            base_url="https://momence.com",
-            cookies=cookies,
-            timeout=30.0,
-            follow_redirects=True,
-            headers={"accept": "application/json, text/plain, */*"},
-        ) as http:
-            for member_id in unique_member_ids:
-                context = _fetch_member_context_http(http, settings.momence_host_id, member_id)
-                records_processed += _apply_member_context(db, client_map[member_id], context, now)
+        api_client = MomenceClient()
+        for member_id in unique_member_ids:
+            notes = asyncio.run(api_client.fetch_member_notes(member_id))
+            memberships = asyncio.run(api_client.fetch_member_memberships(member_id))
+            context = {"notes": notes, "memberships": memberships}
+            records_processed += _apply_member_context(db, client_map[member_id], context, now)
         db.commit()
         refresh_all_flags(db)
         record_sync_state(db, "memberships_notes", status="completed", records_processed=len(unique_member_ids))
