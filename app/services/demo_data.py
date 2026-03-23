@@ -537,6 +537,7 @@ def _celebration_spotlight(client: Client, booking: Booking | None, now: datetim
     flags_summary = build_flag_summary(client, now)
     booking_milestone = _booking_milestone_label(client, booking, now)
     class_number_today = _booking_class_number_today(client, booking, now)
+    current_lifetime = _canonical_client_lifetime_visits(client, now)
 
     if booking_milestone:
         return {
@@ -562,15 +563,15 @@ def _celebration_spotlight(client: Client, booking: Booking | None, now: datetim
             "value": "Welcome-back visit",
             "note": "Acknowledge the return and make re-entry feel easy and encouraging.",
         }
-    next_milestone = next((value for value in sorted(VISIT_MILESTONES) if value > _canonical_client_lifetime_visits(client, now)), None)
+    next_milestone = next((value for value in sorted(VISIT_MILESTONES) if value > current_lifetime), None)
     if next_milestone is not None:
-        current = _canonical_client_lifetime_visits(client, now)
-        gap = next_milestone - current
-        return {
-            "title": "Celebration",
-            "value": f"{gap} away from {next_milestone}",
-            "note": "No prize moment today, but this client is getting close to the next milestone.",
-        }
+        gap = next_milestone - current_lifetime
+        if gap <= 3:
+            return {
+                "title": "Celebration",
+                "value": f"{gap} away from {next_milestone}",
+                "note": "Not a prize moment today, but this client is close enough to the next milestone that staff should keep it in mind.",
+            }
     return {
         "title": "Celebration",
         "value": "No active celebration",
