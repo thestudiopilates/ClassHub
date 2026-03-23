@@ -387,6 +387,18 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
     }
 
 
+def _roster_sort_key(client: Client, now: datetime) -> tuple[int, str]:
+    flags_summary = build_flag_summary(client, now)
+    has_milestone = bool(build_milestones(client, now))
+    is_featured = (
+        flags_summary.new_client
+        or has_milestone
+        or flags_summary.birthday_this_week
+        or flags_summary.churn_risk == "high"
+    )
+    return (0 if is_featured else 1, _full_name(client).lower())
+
+
 def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     current_day = _resolve_demo_day(db, day)
     now = datetime.now(timezone.utc)
@@ -480,11 +492,17 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     sessions = []
     for session_id, session_bookings in grouped_bookings.items():
         first = session_bookings[0]
+        ordered_bookings = sorted(
+            session_bookings,
+            key=lambda booking: _roster_sort_key(client_by_id.get(booking.client_id), now)
+            if client_by_id.get(booking.client_id) is not None
+            else (1, ""),
+        )
         roster = []
         special_returns = 0
         birthdays = 0
         milestones_count = 0
-        for booking in session_bookings:
+        for booking in ordered_bookings:
             client = client_by_id.get(booking.client_id)
             if client is None:
                 continue
