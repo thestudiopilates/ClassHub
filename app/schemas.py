@@ -183,3 +183,68 @@ class BookingCheckInResponse(BaseModel):
 
 class MomenceTokenImportRequest(BaseModel):
     payload: Dict[str, object]
+
+
+class SeedActivityPayload(BaseModel):
+    last_checkin_at: Optional[datetime] = None
+    last_booking_at: Optional[datetime] = None
+    next_booking_at: Optional[datetime] = None
+    first_visit_at: Optional[datetime] = None
+    total_visits: int = 0
+    lifetime_visits_baseline: int = 0
+    lifetime_visits_increment: int = 0
+    lifetime_visits_baseline_as_of: Optional[datetime] = None
+    visits_last_30d: int = 0
+    visits_previous_30d: int = 0
+    has_active_membership: bool = False
+    active_membership_name: Optional[str] = None
+
+
+class SeedProfileDataPayload(BaseModel):
+    fun_fact: Optional[str] = None
+    pregnant_status: Optional[str] = None
+    pregnancy_due_date: Optional[date_type] = None
+    heard_about_us: Optional[str] = None
+
+
+class SeedPreferencesPayload(BaseModel):
+    favorite_time_of_day: Optional[str] = None
+    favorite_weekdays: Optional[str] = None
+    favorite_instructors: Optional[str] = None
+    favorite_formats: Optional[str] = None
+    preference_basis: Optional[str] = None
+
+
+class SeedNotePayload(BaseModel):
+    type: Optional[str] = None
+    text: str
+    is_injury_flag: bool = False
+    is_front_desk_flag: bool = False
+    is_instructor_flag: bool = False
+    source_updated_at: Optional[datetime] = None
+
+
+class SeedClientPayload(BaseModel):
+    member_id: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    birthday: Optional[date_type] = None
+    source_updated_at: Optional[datetime] = None
+    activity: Optional[SeedActivityPayload] = None
+    profile_data: Optional[SeedProfileDataPayload] = None
+    preferences: Optional[SeedPreferencesPayload] = None
+    notes: List[SeedNotePayload] = []
+
+
+class SeedImportRequest(BaseModel):
+    clients: List[SeedClientPayload]
+    recompute_flags: bool = False
+
+
+class SeedImportResponse(BaseModel):
+    imported_clients: int
+    imported_notes: int
+    recomputed_flags: bool = False

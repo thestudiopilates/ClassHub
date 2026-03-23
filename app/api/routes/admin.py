@@ -4,17 +4,21 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.db.models import Client, ClientActivity, ClientNote, ClientPreference, ClientProfileData
 from app.services.momence.client import MomenceClient
 from app.services.automation import run_preopen_ops_sync
 from app.schemas import (
     BookingHistoryProgressResponse,
     BookingHistoryRunRequest,
     MomenceTokenImportRequest,
+    SeedImportRequest,
+    SeedImportResponse,
     RosterHistoryRunRequest,
     SyncRunResponse,
     TargetedRefreshRequest,
 )
 from app.services.momence.token_store import save_tokens
+from app.services.domain import refresh_all_flags
 from app.services.sync.jobs import (
     get_booking_history_progress,
     refresh_clients_by_member_ids,
@@ -146,3 +150,84 @@ def debug_import_momence_tokens(request: MomenceTokenImportRequest) -> dict:
         "has_refresh_token": bool(tokens.get("refresh_token")),
         "expires_at": tokens.get("expires_at"),
     }
+
+
+@router.post("/seed/import-batch", response_model=SeedImportResponse)
+def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db)) -> SeedImportResponse:
+    imported_clients = 0
+    imported_notes = 0
+    for item in request.clients:
+        client = db.query(Client).filter(Client.momence_member_id == item.member_id).one_or_none()
+        if client is None:
+            client = Client(momence_member_id=item.member_id)
+        client.first_name = item.first_name
+        client.last_name = item.last_name
+        client.full_name = item.full_name or " ".join(part for part in [item.first_name, item.last_name] if part).strip()
+        client.email = item.email
+        client.phone = item.phone
+        client.birthday = item.birthday
+        client.source_updated_at = item.source_updated_at
+        db.add(client)
+        db.flush()
+
+        if item.activity is not None:
+            activity = client.activity or ClientActivity(client_id=client.id)
+            activity.last_checkin_at = item.activity.last_checkin_at
+            activity.last_booking_at = item.activity.last_booking_at
+            activity.next_booking_at = item.activity.next_booking_at
+            activity.first_visit_at = item.activity.first_visit_at
+            activity.total_visits = item.activity.total_visits
+            activity.lifetime_visits_baseline = item.activity.lifetime_visits_baseline
+            activity.lifetime_visits_increment = item.activity.lifetime_visits_increment
+            activity.lifetime_visits_baseline_as_of = item.activity.lifetime_visits_baseline_as_of
+            activity.visits_last_30d = item.activity.visits_last_30d
+            activity.visits_previous_30d = item.activity.visits_previous_30d
+            activity.has_active_membership = item.activity.has_active_membership
+            activity.active_membership_name = item.activity.active_membership_name
+            db.add(activity)
+
+        if item.profile_data is not None:
+            profile = client.profile_data or ClientProfileData(client_id=client.id)
+            profile.fun_fact = item.profile_data.fun_fact
+            profile.pregnant_status = item.profile_data.pregnant_status
+            profile.pregnancy_due_date = item.profile_data.pregnancy_due_date
+            profile.heard_about_us = item.profile_data.heard_about_us
+            db.add(profile)
+
+        if item.preferences is not None:
+            pref = client.preferences or ClientPreference(client_id=client.id)
+            pref.favorite_time_of_day = item.preferences.favorite_time_of_day
+            pref.favorite_weekdays = item.preferences.favorite_weekdays
+            pref.favorite_instructors = item.preferences.favorite_instructors
+            pref.favorite_formats = item.preferences.favorite_formats
+            pref.preference_basis = item.preferences.preference_basis
+            db.add(pref)
+
+        if item.notes:
+            db.query(ClientNote).filter(ClientNote.client_id == client.id).delete()
+            for note in item.notes:
+                db.add(
+                    ClientNote(
+                        client_id=client.id,
+                        note_type=note.type,
+                        note_text=note.text,
+                        is_injury_flag=note.is_injury_flag,
+                        is_front_desk_flag=note.is_front_desk_flag,
+                        is_instructor_flag=note.is_instructor_flag,
+                        source_updated_at=note.source_updated_at,
+                    )
+                )
+                imported_notes += 1
+
+        imported_clients += 1
+
+    db.commit()
+    recomputed = False
+    if request.recompute_flags:
+        refresh_all_flags(db)
+        recomputed = True
+    return SeedImportResponse(
+        imported_clients=imported_clients,
+        imported_notes=imported_notes,
+        recomputed_flags=recomputed,
+    )
