@@ -13,6 +13,10 @@ Repo:
 
 - `thestudiopilates/ClassHub`
 
+Runtime:
+
+- `runtime.txt` pins Python 3.11 for Railway/Nixpacks
+
 Start command:
 
 ```bash
