@@ -1202,6 +1202,18 @@ def _try_parse_report_datetime(value: str) -> datetime | None:
     return None
 
 
+def _normalize_format_label(value: str | None) -> str | None:
+    if not value:
+        return None
+    label = " ".join(str(value).split()).strip()
+    if not label:
+        return None
+    label = re.sub(r"\s*-\s*(Emory|W\.?\s*Midtown|West\s*Midtown)\s*$", "", label, flags=re.IGNORECASE)
+    label = re.sub(r"\s*-\s*\((Emory|W\.?\s*Midtown|West\s*Midtown)\)\s*$", "", label, flags=re.IGNORECASE)
+    label = re.sub(r"\s*\((Emory|W\.?\s*Midtown|West\s*Midtown)\)\s*$", "", label, flags=re.IGNORECASE)
+    return " ".join(label.split()).strip()
+
+
 def _apply_session_booking_rows(db: Session, rows: list[dict[str, str]]) -> int:
     stats: dict[str, dict[str, Counter]] = defaultdict(
         lambda: {
@@ -1224,7 +1236,9 @@ def _apply_session_booking_rows(db: Session, rows: list[dict[str, str]]) -> int:
         start_key = _first_matching_key(row, ["class date", "session date", "starts at", "session start", "start", "date"])
 
         if class_key and row.get(class_key):
-            stats[email]["formats"][row[class_key]] += 1
+            normalized_format = _normalize_format_label(row[class_key])
+            if normalized_format:
+                stats[email]["formats"][normalized_format] += 1
         if instructor_key and row.get(instructor_key):
             stats[email]["instructors"][row[instructor_key]] += 1
         if start_key and row.get(start_key):
@@ -1287,8 +1301,9 @@ def recompute_preferences_from_bookings(db: Session, *, lookback_days: int = 180
         if starts_at is None:
             continue
         client_stats = stats[booking.client_id]
-        if booking.class_name:
-            client_stats["formats"][booking.class_name] += 1
+        normalized_format = _normalize_format_label(booking.class_name)
+        if normalized_format:
+            client_stats["formats"][normalized_format] += 1
         if booking.instructor_name:
             client_stats["instructors"][booking.instructor_name] += 1
         client_stats["weekdays"][starts_at.strftime("%A")] += 1

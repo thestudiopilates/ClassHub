@@ -408,7 +408,8 @@ def _profile_details(client: Client, churn_level: str, current_reason: str) -> l
     favorite_instructors = (
         [item for item in (preferences.favorite_instructors or "").split("|") if item] if preferences else []
     )
-    favorite_formats = [item for item in (preferences.favorite_formats or "").split("|") if item] if preferences else []
+    favorite_formats = [_normalize_format_label(item) for item in (preferences.favorite_formats or "").split("|")] if preferences else []
+    favorite_formats = [item for item in favorite_formats if item]
     lifetime_visits = _canonical_client_lifetime_visits(client)
     current_30, previous_30 = _canonical_visit_windows(client)
     active_membership_name = _active_membership_label(client)
@@ -463,6 +464,16 @@ def _normalize_preference_label(value: str | None) -> str | None:
         return None
     collapsed = " ".join(value.split()).strip()
     return collapsed or None
+
+
+def _normalize_format_label(value: str | None) -> str | None:
+    label = _normalize_preference_label(value)
+    if not label:
+        return None
+    label = re.sub(r"\s*-\s*(Emory|W\.?\s*Midtown|West\s*Midtown)\s*$", "", label, flags=re.IGNORECASE)
+    label = re.sub(r"\s*-\s*\((Emory|W\.?\s*Midtown|West\s*Midtown)\)\s*$", "", label, flags=re.IGNORECASE)
+    label = re.sub(r"\s*\((Emory|W\.?\s*Midtown|West\s*Midtown)\)\s*$", "", label, flags=re.IGNORECASE)
+    return " ".join(label.split()).strip()
 
 
 def _membership_fit_summary(client: Client) -> dict[str, str]:
@@ -611,7 +622,7 @@ def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
 
     for booking in history:
         instructor_name = _normalize_preference_label(booking.instructor_name)
-        class_name = _normalize_preference_label(booking.class_name)
+        class_name = _normalize_format_label(booking.class_name)
         if instructor_name:
             instructor_counts[instructor_name] += 1
         if class_name:
