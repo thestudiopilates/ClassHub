@@ -437,7 +437,6 @@ const state = {
   view: "instructor",
   location: "emory",
   selectedSessionId: fallbackData.sessions[0].id,
-  selectedProfileId: "monica-abdelmalak",
   expandedRosterIds: ["monica-abdelmalak", "priya-shah"],
   query: "",
   checkInByBookingId: buildInitialCheckInState(),
@@ -449,9 +448,7 @@ const celebrations = document.getElementById("celebrations");
 const frontdeskGrid = document.getElementById("frontdesk-grid");
 const sessionList = document.getElementById("session-list");
 const sessionRoster = document.getElementById("session-roster");
-const profilePanel = document.getElementById("profile-panel");
 const searchInput = document.getElementById("search-input");
-const closeButton = document.getElementById("profile-close");
 const locationButtons = Array.from(document.querySelectorAll(".location-pill"));
 const liveDayNote = document.getElementById("live-day-note");
 
@@ -615,8 +612,28 @@ function renderFrontdesk() {
       const checkIn = item.bookingId ? state.checkInByBookingId[item.bookingId] : null;
       const isNew = isNewClient(person, item);
       const alertModel = buildAlertModel(person, item);
+      const badgeMarkup = item.badges.length
+        ? `
+            <div class="badge-row">
+              ${item.badges.map((badge) => `<span class="badge ${toneClass(badge.tone)}">${badge.label}</span>`).join("")}
+            </div>
+          `
+        : "";
+      const pillMarkup = alertModel.pills.length
+        ? `
+            <div class="pill-row">
+              ${alertModel.pills
+                .map((pill) =>
+                  pill.html
+                    ? `<span class="alert-pill ${pill.tone}">${pill.html}</span>`
+                    : `<span class="alert-pill ${pill.tone}">${pill.text}</span>`,
+                )
+                .join("")}
+            </div>
+          `
+        : "";
       return `
-        <article class="person-card ${riskLevelClass(person.churnRisk?.level, isNew)}" data-profile-id="${item.id}">
+        <article class="person-card ${riskLevelClass(person.churnRisk?.level, isNew)}">
           <header>
             <div>
               <div class="person-name">${person.name}</div>
@@ -626,24 +643,14 @@ function renderFrontdesk() {
                 <span>${person.membership}</span>
               </div>
             </div>
-            <div class="badge-row">
-              ${item.badges.map((badge) => `<span class="badge ${toneClass(badge.tone)}">${badge.label}</span>`).join("")}
-            </div>
+            ${badgeMarkup}
           </header>
           ${
             alertModel.primary
               ? `<div class="alert-bar is-${alertModel.primary.tone}"><strong>${alertModel.primary.label}:</strong> ${alertModel.primary.text}</div>`
               : ""
           }
-          <div class="pill-row">
-            ${alertModel.pills
-              .map((pill) =>
-                pill.html
-                  ? `<span class="alert-pill ${pill.tone}">${pill.html}</span>`
-                  : `<span class="alert-pill ${pill.tone}">${pill.text}</span>`,
-              )
-              .join("")}
-          </div>
+          ${pillMarkup}
           <div class="metrics">
             ${item.metrics
               .map(
@@ -678,7 +685,7 @@ function renderFrontdesk() {
           }
           <footer>
             <div class="service-prompt">${person.profile.chips[0]}</div>
-            <a class="action-link" href="#" data-profile-id="${item.id}">Pin profile</a>
+            <div class="frontdesk-context">${person.profile.subtext}</div>
           </footer>
         </article>
       `;
@@ -690,7 +697,7 @@ function renderSessions() {
   const sessions = currentData.sessions.filter((session) =>
     matchesQuery([session.title, session.time, session.instructor, session.roster.map((item) => getPerson(item.personId).name).join(" ")]),
   );
-  liveDayNote.textContent = `Highlights stay visible on the roster for ${currentDayLabel()}. Tap a card to drop down teaching cues, stats, and service prompts.`;
+  liveDayNote.textContent = `Highlights stay visible on the roster for ${currentDayLabel()}, and the rest of the client summary expands downward right inside each card.`;
 
   sessionList.innerHTML = `
     <div class="session-stack">
@@ -763,8 +770,26 @@ function renderSessions() {
           const checkIn = entry.bookingId ? state.checkInByBookingId[entry.bookingId] : null;
           const isNew = isNewClient(person, entry);
           const alertModel = buildAlertModel(person, entry);
+          const nonFunFactPills = alertModel.pills.filter((pill) => pill.tone !== "fun-fact");
+          const badgeMarkup = entry.badges.length
+            ? `
+                <div class="badge-row">
+                  ${entry.badges.map((badge) => `<span class="badge ${toneClass(badge.tone)}">${badge.label}</span>`).join("")}
+                </div>
+              `
+            : "";
+          const pillMarkup = nonFunFactPills.length
+            ? `
+                <div class="pill-row">
+                  ${nonFunFactPills.map((pill) => `<span class="alert-pill ${pill.tone}">${pill.text}</span>`).join("")}
+                </div>
+              `
+            : "";
+          const funFactMarkup = person.funFact
+            ? `<div class="alert-pill fun-fact"><strong>Fun fact:</strong> <span>${person.funFact}</span></div>`
+            : "";
           return `
-            <article class="roster-card ${expanded ? "is-expanded" : ""} ${riskLevelClass(person.churnRisk?.level, isNew)}" data-profile-id="${entry.personId}">
+            <article class="roster-card ${expanded ? "is-expanded" : ""} ${riskLevelClass(person.churnRisk?.level, isNew)}" data-expand-card-id="${entry.personId}">
               <div class="roster-body">
                 <header>
                   <div class="roster-identity">
@@ -778,7 +803,7 @@ function renderSessions() {
                     </div>
                   </div>
                   <div class="roster-top-right">
-                    <div class="alert-pill fun-fact"><strong>Fun fact:</strong> <span>${person.funFact}</span></div>
+                    ${funFactMarkup}
                     ${
                       entry.bookingId
                         ? `
@@ -799,9 +824,7 @@ function renderSessions() {
                         `
                         : ""
                     }
-                    <div class="badge-row">
-                      ${entry.badges.map((badge) => `<span class="badge ${toneClass(badge.tone)}">${badge.label}</span>`).join("")}
-                    </div>
+                    ${badgeMarkup}
                   </div>
                 </header>
                 ${
@@ -809,12 +832,7 @@ function renderSessions() {
                     ? `<div class="alert-bar is-${alertModel.primary.tone}"><strong>${alertModel.primary.label}:</strong> ${alertModel.primary.text}</div>`
                     : ""
                 }
-                <div class="pill-row">
-                  ${alertModel.pills
-                    .filter((pill) => pill.tone !== "fun-fact")
-                    .map((pill) => `<span class="alert-pill ${pill.tone}">${pill.text}</span>`)
-                    .join("")}
-                </div>
+                ${pillMarkup}
                 <div class="metrics">
                   ${entry.stats
                     .map(
@@ -835,20 +853,39 @@ function renderSessions() {
                   </button>
                 </div>
                 <div class="expand-details">
-                  <div class="assumption-card">
-                    <strong>Assumption</strong>
-                    <p>${entry.expand.assumption}</p>
+                  <div class="expand-grid">
+                    <div class="assumption-card">
+                      <strong>Assumption</strong>
+                      <p>${entry.expand.assumption}</p>
+                    </div>
+                    <div class="service-card">
+                      <strong>Team move</strong>
+                      <p>${entry.expand.service}</p>
+                    </div>
+                    <div class="assumption-card">
+                      <strong>Risk rule</strong>
+                      <p>${person.churnRisk.rule}</p>
+                    </div>
+                    <div class="assumption-card">
+                      <strong>Client read</strong>
+                      <p>${person.profile.subtext}</p>
+                    </div>
                   </div>
-                  <div class="service-card">
-                    <strong>Team move</strong>
-                    <p>${entry.expand.service}</p>
+                  <div class="inline-detail-grid">
+                    ${person.profile.details
+                      .map(
+                        (detail) => `
+                          <div class="detail-item ${detailTone(detail.label)}">
+                            <span>${detail.label}</span>
+                            <strong>${detail.value}</strong>
+                          </div>
+                        `,
+                      )
+                      .join("")}
                   </div>
-                  <div class="assumption-card">
-                    <strong>Risk rule</strong>
-                    <p>${person.churnRisk.rule}</p>
-                  </div>
-                  <div class="chip-row">
+                  <div class="inline-notes">
                     ${entry.expand.notes.map((note) => `<span class="chip">${note}</span>`).join("")}
+                    ${person.profile.notes.map((note) => `<article><strong>Team prompt</strong><p>${note}</p></article>`).join("")}
                   </div>
                 </div>
               </div>
@@ -857,75 +894,6 @@ function renderSessions() {
         })
         .join("")}
     </div>
-  `;
-}
-
-function renderProfile() {
-  const person = getPerson(state.selectedProfileId);
-  if (!person) {
-    profilePanel.innerHTML = `<div class="empty-state"><p>Select a client to view their profile.</p></div>`;
-    return;
-  }
-
-  profilePanel.innerHTML = `
-    <article class="profile-card">
-      <div class="profile-card-header">
-        <div>
-          <p class="eyebrow">${person.profile.firstName}</p>
-          <h3 class="profile-name">${person.profile.fullName}</h3>
-          <p class="profile-subtext">${person.profile.subtext}</p>
-        </div>
-      </div>
-      <div class="profile-accent-row">
-        <div class="accent-band fun-fact">
-          <strong>Fun fact</strong>
-          <div>${person.funFact}</div>
-        </div>
-        <div class="accent-band milestone">
-          <strong>Milestone lens</strong>
-          <div>${person.profile.chips[0]}</div>
-        </div>
-        <div class="accent-band churn">
-          <strong>Churn risk</strong>
-          <div>${person.churnRisk.level} · ${person.churnRisk.reason}</div>
-        </div>
-      </div>
-      <div class="profile-action-row">
-        ${person.profile.chips
-          .map(
-            (chip, index) => `
-              <button class="profile-action ${index === 0 ? "is-primary" : "is-secondary"}" type="button">
-                ${chip}
-              </button>
-            `,
-          )
-          .join("")}
-      </div>
-      <div class="detail-grid">
-        ${person.profile.details
-          .map(
-            (detail) => `
-              <div class="detail-item ${detailTone(detail.label)}">
-                <span>${detail.label}</span>
-                <strong>${detail.value}</strong>
-              </div>
-            `,
-          )
-          .join("")}
-      </div>
-      <div class="notes-list">
-        ${person.profile.notes
-          .map((note) => {
-            return `
-              <article>
-                <strong>Team prompt</strong>
-                <p>${note}</p>
-              </article>
-            `;
-          })
-          .join("")}
-      </div>
-    </article>
   `;
 }
 
@@ -943,10 +911,6 @@ function normalizeLiveData(payload) {
 }
 
 function syncStateToCurrentData() {
-  const selectedProfileId = currentData.meta?.selectedProfileId || Object.keys(currentData.people)[0];
-  if (!currentData.people[state.selectedProfileId]) {
-    state.selectedProfileId = selectedProfileId;
-  }
   if (!currentData.sessions.some((session) => session.id === state.selectedSessionId)) {
     state.selectedSessionId = currentData.meta?.selectedSessionId || currentData.sessions[0]?.id || "";
   }
@@ -966,7 +930,6 @@ function render() {
   });
   renderFrontdesk();
   renderSessions();
-  renderProfile();
 }
 
 async function loadLiveDemoData() {
@@ -1070,6 +1033,18 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const expandCard = target.closest("[data-expand-card-id]");
+  if (expandCard && !target.closest("[data-checkin-id]")) {
+    const personId = expandCard.dataset.expandCardId;
+    if (state.expandedRosterIds.includes(personId)) {
+      state.expandedRosterIds = state.expandedRosterIds.filter((item) => item !== personId);
+    } else {
+      state.expandedRosterIds = [...state.expandedRosterIds, personId];
+    }
+    renderSessions();
+    return;
+  }
+
   const checkInTrigger = target.closest("[data-checkin-id]");
   if (checkInTrigger) {
     event.preventDefault();
@@ -1079,13 +1054,6 @@ document.addEventListener("click", (event) => {
     if (!bookingId || !checkIn) return;
     void setCheckInState(bookingId, !checkIn.checkedIn);
     return;
-  }
-
-  const profileTrigger = target.closest("[data-profile-id]");
-  if (profileTrigger) {
-    event.preventDefault();
-    state.selectedProfileId = profileTrigger.dataset.profileId;
-    renderProfile();
   }
 
   const sessionTrigger = target.closest("[data-session-id]");
@@ -1100,10 +1068,6 @@ searchInput.addEventListener("input", (event) => {
   if (!(target instanceof HTMLInputElement)) return;
   state.query = target.value.trim().toLowerCase();
   render();
-});
-
-closeButton.addEventListener("click", () => {
-  profilePanel.innerHTML = `<div class="empty-state"><p>Select a client card or a roster member to pin a deeper profile here.</p></div>`;
 });
 
 renderSummary();

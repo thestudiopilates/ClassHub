@@ -57,14 +57,13 @@ input {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 360px;
-  gap: 16px;
+  grid-template-columns: 252px minmax(0, 1fr);
+  gap: 14px;
   min-height: 100vh;
-  padding: 16px;
+  padding: 14px;
 }
 
 .sidebar,
-.profile-rail,
 .board,
 .session-list,
 .session-roster {
@@ -74,15 +73,14 @@ input {
   box-shadow: var(--card-shadow);
 }
 
-.sidebar,
-.profile-rail {
-  padding: 18px;
+.sidebar {
+  padding: 16px;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .brand-lockup {
@@ -148,7 +146,7 @@ input {
 }
 
 .sidebar-panel {
-  padding: 14px;
+  padding: 12px;
   background: var(--white);
   border-radius: var(--card-radius);
   border: 1px solid var(--border-soft);
@@ -431,7 +429,7 @@ input {
 
 .board {
   display: none;
-  padding: 16px;
+  padding: 14px;
 }
 
 .board.is-active {
@@ -443,7 +441,7 @@ input {
   justify-content: space-between;
   gap: 10px;
   align-items: end;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .section-head h3 {
@@ -458,7 +456,7 @@ input {
 
 .card-grid {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .person-card,
@@ -511,10 +509,10 @@ input {
 }
 
 .person-card {
-  padding: 14px 14px 12px 18px;
+  padding: 12px 12px 10px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .person-card header,
@@ -554,7 +552,7 @@ input {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 20px;
   font-size: 12px;
   line-height: 1.1;
@@ -584,9 +582,9 @@ input {
 }
 
 .alert-bar {
-  padding: 10px 12px;
+  padding: 9px 11px;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -654,8 +652,8 @@ input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 112px;
-  padding: 10px 16px;
+  min-width: 102px;
+  padding: 9px 14px;
   border-radius: 12px;
   background: var(--apricot);
   color: var(--white);
@@ -697,12 +695,12 @@ input {
 .class-banner-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .person-card footer {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   align-items: start;
   padding-top: 8px;
   border-top: 1px solid var(--oat);
@@ -714,6 +712,11 @@ input {
   color: var(--terracotta);
 }
 
+.frontdesk-context {
+  font-size: 13px;
+  color: var(--sage);
+}
+
 .action-link {
   color: var(--seaglass);
   font-size: 13px;
@@ -723,25 +726,25 @@ input {
 
 .session-layout {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 10px;
 }
 
 .session-list,
 .session-roster {
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.6);
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .session-stack,
 .roster-stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
 
 .session-card {
-  padding: 12px;
+  padding: 10px;
   cursor: pointer;
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
@@ -762,11 +765,11 @@ input {
 }
 
 .session-title {
-  font-size: 18px;
+  font-size: 17px;
 }
 
 .roster-card {
-  padding: 14px 14px 12px 18px;
+  padding: 12px 12px 10px 16px;
   cursor: pointer;
 }
 
@@ -776,7 +779,7 @@ input {
 
 .roster-body {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .roster-card header {
@@ -790,14 +793,15 @@ input {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
+  gap: 6px;
+  max-width: 270px;
 }
 
 .class-banner {
   display: grid;
-  gap: 12px;
-  margin-bottom: 12px;
-  padding: 14px;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 12px;
 }
 
 .class-banner-top {
@@ -816,6 +820,7 @@ input {
   justify-content: space-between;
   gap: 8px;
   align-items: center;
+  padding-top: 2px;
 }
 
 .expand-summary {
@@ -841,16 +846,22 @@ input {
 .expand-details {
   display: none;
   gap: 8px;
-  padding-top: 2px;
+  padding-top: 4px;
 }
 
 .roster-card.is-expanded .expand-details {
   display: grid;
 }
 
+.expand-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .assumption-card,
 .service-card {
-  padding: 12px;
+  padding: 10px;
   border-radius: 8px;
   border: 1px solid var(--border-soft);
   background: var(--oat);
@@ -870,109 +881,8 @@ input {
 .assumption-card p,
 .service-card p {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--coffee);
-}
-
-.profile-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.profile-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.ghost-button {
-  padding: 8px 12px;
-  border-radius: 12px;
-  background: var(--oat);
-  color: var(--seaglass);
-  font-weight: 700;
-}
-
-.profile-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.empty-state,
-.profile-card {
-  padding: 14px;
-}
-
-.profile-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.profile-accent-row {
-  display: grid;
-  gap: 8px;
-}
-
-.accent-band {
-  padding: 12px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-}
-
-.accent-band strong {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 11px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-}
-
-.accent-band.fun-fact {
-  background: var(--seaglass);
-  color: var(--white);
-}
-
-.accent-band.milestone {
-  background: var(--sunshine);
-  color: var(--coffee);
-}
-
-.accent-band.churn {
-  background: var(--cherry);
-  color: var(--white);
-}
-
-.profile-action-row {
-  gap: 10px;
-}
-
-.profile-action {
-  padding: 10px 20px;
-  border-radius: 12px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.profile-action.is-primary {
-  background: var(--seaglass);
-  color: var(--white);
-}
-
-.profile-action.is-primary:hover {
-  box-shadow: inset 0 0 0 999px rgba(40, 32, 14, 0.08);
-}
-
-.profile-action.is-secondary {
-  background: var(--white);
-  color: var(--seaglass);
-  border: 1px solid var(--seaglass);
-}
-
-.profile-action.is-secondary:hover {
-  background: var(--seaglass-soft);
 }
 
 .detail-grid {
@@ -981,8 +891,14 @@ input {
   gap: 8px;
 }
 
+.inline-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .detail-item {
-  padding: 10px;
+  padding: 9px;
   border-radius: 8px;
   background: var(--oat);
   border: 1px solid var(--stat-border);
@@ -1003,18 +919,27 @@ input {
   color: var(--coffee);
 }
 
-.notes-list {
-  gap: 8px;
+.notes-list,
+.inline-notes {
+  gap: 6px;
 }
 
-.notes-list article {
-  padding: 12px;
+.inline-notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.notes-list article,
+.inline-notes article {
+  padding: 10px;
   border-radius: 8px;
   background: var(--seaglass);
   color: var(--white);
 }
 
-.notes-list strong {
+.notes-list strong,
+.inline-notes strong {
   display: block;
   margin-bottom: 6px;
   font-size: 11px;
@@ -1023,9 +948,10 @@ input {
   text-transform: uppercase;
 }
 
-.notes-list p {
+.notes-list p,
+.inline-notes p {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .hidden {
@@ -1037,8 +963,7 @@ input {
     grid-template-columns: 1fr;
   }
 
-  .sidebar,
-  .profile-rail {
+  .sidebar {
     order: 2;
   }
 
@@ -1070,6 +995,8 @@ input {
 
   .card-grid,
   .detail-grid,
+  .inline-detail-grid,
+  .expand-grid,
   .metrics,
   .session-layout,
   .class-banner-grid,
