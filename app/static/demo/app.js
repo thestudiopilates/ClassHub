@@ -622,10 +622,10 @@ function buildAlertModel(person, item) {
   const returnBadge = item.badges?.find((badge) => badge.label.toLowerCase().includes("return") || badge.label.toLowerCase().includes("back after baby"));
 
   let primary = null;
-  if (level === "high" || level === "medium") {
+  if (level === "high") {
     primary = {
       tone: "risk",
-      label: `${level === "high" ? "High" : "Medium"} churn risk`,
+      label: "High churn risk",
       text: person.churnRisk.reason,
     };
   } else if (milestone || birthday) {
@@ -646,7 +646,9 @@ function buildAlertModel(person, item) {
   if (person.funFact) {
     pills.push({ tone: "fun-fact", html: `<strong>Fun fact:</strong> <span>${person.funFact}</span>` });
   }
-  if (level === "low") {
+  if (level === "medium") {
+    pills.push({ tone: "note", text: "Medium churn risk" });
+  } else if (level === "low") {
     pills.push({ tone: "low-risk", text: "Low churn risk" });
   }
   notes.slice(0, 2).forEach((note) => pills.push({ tone: "note", text: note }));
