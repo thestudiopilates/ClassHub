@@ -257,6 +257,30 @@ class MomenceClient:
     async def fetch_upcoming_bookings(self, start: date, end: date) -> list[dict]:
         return await self.fetch_session_bookings_between(start, end)
 
+    async def fetch_auth_profile(self) -> dict:
+        async with await self._authorized_client() as client:
+            response = await client.get("/api/v2/auth/profile")
+            response.raise_for_status()
+            return response.json()
+
+    async def debug_session_window(self, start: date | datetime, end: date | datetime) -> dict:
+        attempts: list[dict] = []
+        async with await self._authorized_client() as client:
+            for params in self._session_window_param_attempts(start, end):
+                response = await client.get("/api/v2/host/sessions", params={"page": 0, "pageSize": 5, **params})
+                body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                payload = body.get("payload", []) if isinstance(body, dict) else []
+                attempts.append(
+                    {
+                        "params": params,
+                        "status_code": response.status_code,
+                        "count": len(payload),
+                        "sample_session_ids": [item.get("id") for item in payload[:5]],
+                        "sample_names": [item.get("name") for item in payload[:5]],
+                    }
+                )
+        return {"attempts": attempts}
+
     async def fetch_member_profile(self, momence_member_id: str) -> dict:
         async with await self._authorized_client() as client:
             response = await client.get(f"/api/v2/host/members/{momence_member_id}")

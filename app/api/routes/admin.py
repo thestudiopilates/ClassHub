@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends
+from datetime import date, timedelta
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.services.momence.client import MomenceClient
 from app.services.automation import run_preopen_ops_sync
 from app.schemas import (
     BookingHistoryProgressResponse,
@@ -104,3 +107,24 @@ def run_browser_seed_sync(db: Session = Depends(get_db)) -> SyncRunResponse:
 @router.post("/sync/browser/behavior", response_model=SyncRunResponse)
 def run_browser_behavior_sync(db: Session = Depends(get_db)) -> SyncRunResponse:
     return sync_client_behavior_from_reports(db)
+
+
+@router.get("/debug/momence/profile")
+async def debug_momence_profile() -> dict:
+    client = MomenceClient()
+    return await client.fetch_auth_profile()
+
+
+@router.get("/debug/momence/sessions")
+async def debug_momence_sessions(
+    day: date | None = Query(default=None),
+    days: int = Query(default=7, ge=1, le=14),
+) -> dict:
+    client = MomenceClient()
+    start = day or date.today()
+    end = start + timedelta(days=days)
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        **(await client.debug_session_window(start, end)),
+    }
