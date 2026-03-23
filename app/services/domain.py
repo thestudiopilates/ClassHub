@@ -473,7 +473,7 @@ def recompute_visit_window_counts(db: Session, now: datetime) -> None:
     bookings_stmt = select(Booking).where(
         Booking.starts_at >= previous_start,
         Booking.starts_at < now,
-        Booking.status != "cancelled",
+        Booking.status == "checked_in",
     )
     bookings = db.scalars(bookings_stmt).all()
     counts: dict[object, dict[str, int]] = defaultdict(lambda: {"current": 0, "previous": 0})
@@ -490,6 +490,7 @@ def recompute_visit_window_counts(db: Session, now: datetime) -> None:
     activities = db.scalars(select(ClientActivity)).all()
     for activity in activities:
         client_counts = counts.get(activity.client_id, {"current": 0, "previous": 0})
-        activity.visits_last_30d = client_counts["current"]
-        activity.visits_previous_30d = client_counts["previous"]
+        # Preserve stronger imported rollups when hosted booking history is still partial.
+        activity.visits_last_30d = max(activity.visits_last_30d or 0, client_counts["current"])
+        activity.visits_previous_30d = max(activity.visits_previous_30d or 0, client_counts["previous"])
         db.add(activity)

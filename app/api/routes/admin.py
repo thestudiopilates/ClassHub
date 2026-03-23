@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -183,12 +184,19 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
             activity.last_booking_at = item.activity.last_booking_at
             activity.next_booking_at = item.activity.next_booking_at
             activity.first_visit_at = item.activity.first_visit_at
-            activity.total_visits = item.activity.total_visits
-            activity.lifetime_visits_baseline = item.activity.lifetime_visits_baseline
+            imported_baseline = item.activity.lifetime_visits_baseline or 0
+            imported_increment = item.activity.lifetime_visits_increment or 0
+            imported_total = item.activity.total_visits or 0
+            imported_current = item.activity.visits_last_30d or 0
+            imported_previous = item.activity.visits_previous_30d or 0
+            normalized_total = max(imported_total, imported_baseline + imported_increment, imported_current + imported_previous)
+            normalized_baseline = max(imported_baseline, normalized_total - imported_increment)
+            activity.total_visits = normalized_total
+            activity.lifetime_visits_baseline = normalized_baseline
             activity.lifetime_visits_increment = item.activity.lifetime_visits_increment
-            activity.lifetime_visits_baseline_as_of = item.activity.lifetime_visits_baseline_as_of
-            activity.visits_last_30d = item.activity.visits_last_30d
-            activity.visits_previous_30d = item.activity.visits_previous_30d
+            activity.lifetime_visits_baseline_as_of = item.activity.lifetime_visits_baseline_as_of or datetime.now(timezone.utc)
+            activity.visits_last_30d = imported_current
+            activity.visits_previous_30d = imported_previous
             activity.has_active_membership = item.activity.has_active_membership
             activity.active_membership_name = item.activity.active_membership_name
             db.add(activity)
@@ -230,7 +238,13 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
 
         if item.memberships:
             db.query(ClientMembership).filter(ClientMembership.client_id == client.id).delete()
+            active_membership_name: str | None = None
+            has_active_membership = False
             for membership in item.memberships:
+                is_active = (membership.status or "").lower() == "active" or membership.ended_at is None
+                if is_active and not active_membership_name and membership.membership_name:
+                    active_membership_name = membership.membership_name
+                    has_active_membership = True
                 db.add(
                     ClientMembership(
                         client_id=client.id,
@@ -248,6 +262,12 @@ def import_seed_batch(request: SeedImportRequest, db: Session = Depends(get_db))
                     )
                 )
                 imported_memberships += 1
+            activity = client.activity or ClientActivity(client_id=client.id)
+            if active_membership_name and not activity.active_membership_name:
+                activity.active_membership_name = active_membership_name
+            if has_active_membership:
+                activity.has_active_membership = True
+            db.add(activity)
 
         imported_clients += 1
 
