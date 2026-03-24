@@ -6,7 +6,7 @@ import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import case, desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import Booking, Client, ClientActivity, ClientFlag, Milestone
@@ -589,33 +589,48 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     bookings = _prefer_official_bookings(bookings)
     bookings = _filter_relevant_bookings(bookings, current_day)
     client_by_id = {client.id: client for client in active_clients}
-    if bookings:
-        missing_ids = {booking.client_id for booking in bookings if booking.client_id not in client_by_id}
+    missing_ids = {booking.client_id for booking in bookings if booking.client_id not in client_by_id}
+    needed_member_ids = {
+        arrival.member_id for arrival in front_desk_view.arrivals if arrival.member_id
+    } | {
+        roster_item.member_id
+        for session_view in instructor_view.sessions
+        for roster_item in session_view.roster
+        if roster_item.member_id
+    }
+    missing_member_ids = {
+        member_id
+        for member_id in needed_member_ids
+        if member_id not in {client.momence_member_id for client in client_by_id.values()}
+    }
+    if missing_ids or missing_member_ids:
+        filters = []
         if missing_ids:
-            extra_stmt = (
-                select(Client)
-                .where(Client.id.in_(missing_ids))
-                .options(
-                    selectinload(Client.activity),
-                    selectinload(Client.notes),
-                    selectinload(Client.milestones),
-                    selectinload(Client.profile_data),
-                    selectinload(Client.preferences),
-                    selectinload(Client.memberships),
-                    selectinload(Client.bookings),
-                    selectinload(Client.flags),
-                )
+            filters.append(Client.id.in_(missing_ids))
+        if missing_member_ids:
+            filters.append(Client.momence_member_id.in_(missing_member_ids))
+        extra_stmt = (
+            select(Client)
+            .where(or_(*filters))
+            .options(
+                selectinload(Client.activity),
+                selectinload(Client.notes),
+                selectinload(Client.milestones),
+                selectinload(Client.profile_data),
+                selectinload(Client.preferences),
+                selectinload(Client.memberships),
+                selectinload(Client.bookings),
+                selectinload(Client.flags),
             )
-            extra_clients = db.scalars(extra_stmt).all()
-            for client in extra_clients:
-                client_by_id[client.id] = client
-                people[_slug_client(client)] = _client_to_demo_person(client)
+        )
+        extra_clients = db.scalars(extra_stmt).all()
+        for client in extra_clients:
+            client_by_id[client.id] = client
+            people[_slug_client(client)] = _client_to_demo_person(client)
 
     grouped_bookings: dict[str, list[Booking]] = defaultdict(list)
     for booking in bookings:
         grouped_bookings[booking.momence_session_id].append(booking)
-    relevant_session_ids = set(grouped_bookings.keys())
-
     client_by_member_id = {client.momence_member_id: client for client in client_by_id.values()}
     frontdesk = [
         _frontdesk_item_from_ops(arrival, client_by_member_id.get(arrival.member_id))
@@ -631,8 +646,6 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
 
     sessions = []
     for session_view in instructor_view.sessions:
-        if session_view.session_id not in relevant_session_ids:
-            continue
         session_bookings = grouped_bookings.get(session_view.session_id, [])
         bookings_by_id = {booking.momence_booking_id: booking for booking in session_bookings}
         bookings_by_member = {
