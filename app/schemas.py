@@ -67,6 +67,12 @@ class MilestoneSummary(BaseModel):
     date: Optional[date_type] = None
 
 
+class ConciergeSpotlight(BaseModel):
+    title: str
+    value: str
+    note: str
+
+
 class ClientListItem(BaseModel):
     member_id: str
     name: str
@@ -77,6 +83,13 @@ class ClientListItem(BaseModel):
     preferences: PreferencesSummary
     milestones: List[MilestoneSummary]
     notes: List[NoteSummary]
+    join_date_label: Optional[str] = None
+    class_number_today: Optional[int] = None
+    class_number_label: Optional[str] = None
+    booking_milestone: Optional[str] = None
+    churn_reason: Optional[str] = None
+    membership_spotlight: Optional[ConciergeSpotlight] = None
+    celebration_spotlight: Optional[ConciergeSpotlight] = None
 
 
 class SessionRosterItem(BaseModel):
@@ -89,6 +102,14 @@ class SessionRosterItem(BaseModel):
     new_client: bool = False
     welcome_back: bool = False
     total_visits: int = 0
+    fun_fact: Optional[str] = None
+    class_number_today: Optional[int] = None
+    class_number_label: Optional[str] = None
+    booking_milestone: Optional[str] = None
+    churn_risk: Optional[str] = None
+    membership_name: Optional[str] = None
+    membership_spotlight: Optional[ConciergeSpotlight] = None
+    celebration_spotlight: Optional[ConciergeSpotlight] = None
 
 
 class SessionView(BaseModel):

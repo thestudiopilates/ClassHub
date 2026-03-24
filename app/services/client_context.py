@@ -325,6 +325,52 @@ def booking_milestone_label(client: Client, booking: Booking | None, now: dateti
     return None
 
 
+def celebration_spotlight(client: Client, booking: Booking | None, now: datetime) -> dict[str, str]:
+    flags_summary = build_flag_summary(client, now)
+    booking_milestone = booking_milestone_label(client, booking, now)
+    class_number_today = booking_class_number_today(client, booking, now)
+    current_lifetime = canonical_client_lifetime_visits(client, now)
+
+    if booking_milestone:
+        return {
+            "title": "Celebration",
+            "value": booking_milestone,
+            "note": "Call this out clearly and make sure the front desk team celebrates it.",
+        }
+    if flags_summary.birthday_this_week:
+        return {
+            "title": "Celebration",
+            "value": "Birthday week",
+            "note": "A warm birthday acknowledgment or small prize moment would land well.",
+        }
+    if class_number_today == 1:
+        return {
+            "title": "Celebration",
+            "value": "1st class today",
+            "note": "Treat this like a welcome moment and make the first visit feel calm, clear, and personal.",
+        }
+    if flags_summary.welcome_back:
+        return {
+            "title": "Celebration",
+            "value": "Welcome-back visit",
+            "note": "Acknowledge the return and make re-entry feel easy and encouraging.",
+        }
+    next_milestone = next((value for value in sorted(VISIT_MILESTONES) if value > current_lifetime), None)
+    if next_milestone is not None:
+        gap = next_milestone - current_lifetime
+        if gap <= 3:
+            return {
+                "title": "Celebration",
+                "value": f"{gap} away from {next_milestone}",
+                "note": "Not a prize moment today, but this client is close enough to the next milestone that staff should keep it in mind.",
+            }
+    return {
+        "title": "Celebration",
+        "value": "No active celebration",
+        "note": "Use the personal context and service cues instead of a prize or milestone callout.",
+    }
+
+
 def membership_fit_summary(client: Client) -> dict[str, str]:
     membership_name = active_membership_label(client)
     if not membership_name:

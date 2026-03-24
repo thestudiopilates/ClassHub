@@ -35,6 +35,7 @@ from app.services.client_intelligence import (
     prefer_official_bookings,
 )
 from app.services.client_context import (
+    celebration_spotlight,
     build_activity_summary,
     build_badges,
     build_flag_summary,
@@ -44,6 +45,7 @@ from app.services.client_context import (
     build_profile_data_summary,
     build_profile_response_from_context,
     build_enriched_client_context,
+    booking_snapshot,
 )
 from app.services.sync_state import get_freshness_map
 
@@ -158,6 +160,13 @@ def get_front_desk_view(db: Session, day: date, location_name: str | None) -> Fr
                 preferences=context.preferences,
                 milestones=context.milestones,
                 notes=context.notes,
+                join_date_label=context.join_date_label,
+                class_number_today=booking_snapshot(context, booking)["class_number_today"],
+                class_number_label=booking_snapshot(context, booking)["class_number_label"],
+                booking_milestone=booking_snapshot(context, booking)["booking_milestone"],
+                churn_reason=context.churn_reason,
+                membership_spotlight=context.membership_spotlight,
+                celebration_spotlight=celebration_spotlight(context.client, booking, now),
             )
         )
     return FrontDeskResponse(date=day, arrivals=arrivals, freshness=get_freshness_map(db, now))
@@ -201,6 +210,7 @@ def get_instructor_view(
             if client is None:
                 continue
             context = build_enriched_client_context(client, now)
+            snapshot = booking_snapshot(context, booking)
             roster.append(
                 SessionRosterItem(
                     member_id=context.client.momence_member_id,
@@ -213,6 +223,14 @@ def get_instructor_view(
                     new_client=context.flags.new_client,
                     welcome_back=context.flags.welcome_back,
                     total_visits=context.activity.total_visits or 0,
+                    fun_fact=context.profile_data.fun_fact,
+                    class_number_today=snapshot["class_number_today"],
+                    class_number_label=snapshot["class_number_label"],
+                    booking_milestone=snapshot["booking_milestone"],
+                    churn_risk=context.flags.churn_risk,
+                    membership_name=context.active_membership_name,
+                    membership_spotlight=context.membership_spotlight,
+                    celebration_spotlight=celebration_spotlight(context.client, booking, now),
                 )
             )
         sessions.append(
