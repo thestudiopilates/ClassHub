@@ -36,7 +36,7 @@ from app.services.client_context import (
     profile_chips as _profile_chips,
     visit_breakdowns as _visit_breakdowns,
 )
-from app.services.domain import build_client_profile, build_flag_summary, build_milestones
+from app.services.domain import build_client_profile, build_flag_summary, build_milestones, get_front_desk_view
 from app.services.sync_state import get_freshness_map
 
 LOCAL_TZ = ZoneInfo("America/New_York")
@@ -390,6 +390,42 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
     }
 
 
+def _frontdesk_item_from_ops(arrival, client: Client | None) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    flags_summary = build_flag_summary(client, now) if client else arrival.flags
+    notes: list[str] = []
+    if arrival.class_name:
+        notes.append(arrival.class_name)
+    if arrival.booking_milestone:
+        notes.append(arrival.booking_milestone)
+    elif arrival.class_number_label:
+        notes.append(f"{arrival.class_number_label} class today")
+    elif arrival.milestones:
+        lead = arrival.milestones[0]
+        notes.append(lead.value or lead.type)
+    if arrival.flags.birthday_this_week:
+        notes.append("Birthday this week")
+    if arrival.flags.welcome_back:
+        notes.append("First visit back after a gap")
+    if not notes:
+        notes = ["Active client", "Warm check-in opportunity"]
+    return {
+        "id": client.momence_member_id if client else arrival.member_id,
+        "arrival": arrival.arrival_label or "Recently active",
+        "location": arrival.location_name,
+        "bookingId": arrival.booking_id,
+        "checkedIn": arrival.checked_in,
+        "notes": notes[:3],
+        "metrics": [
+            {"label": "Lifetime", "value": str(arrival.activity.total_visits)},
+            {"label": "Last 30", "value": str(arrival.activity.visits_last_30d)},
+            {"label": "Prev 30", "value": str(arrival.activity.visits_previous_30d)},
+            {"label": "Last seen", "value": _format_date_label(arrival.activity.last_checkin_at)},
+        ],
+        "badges": _build_badges(client, flags_summary, now) if client else [],
+    }
+
+
 def _client_to_roster_item(client: Client, booking: Booking | None = None) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     context = build_enriched_client_context(client, now)
@@ -462,6 +498,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     current_day = _resolve_demo_day(db, day)
     now = datetime.now(timezone.utc)
     current_day_label = datetime.combine(current_day, datetime.min.time(), tzinfo=LOCAL_TZ).strftime("%A, %B %-d")
+    front_desk_view = get_front_desk_view(db, current_day, None)
 
     active_stmt = (
         select(Client)
@@ -534,23 +571,18 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     for booking in bookings:
         grouped_bookings[booking.momence_session_id].append(booking)
 
-    frontdesk_pairs: list[tuple[Client, Booking | None]] = []
-    if bookings:
-        seen_client_ids: set[str] = set()
-        for booking in bookings:
-            if booking.client_id in seen_client_ids:
-                continue
-            client = client_by_id.get(booking.client_id)
-            if client is None:
-                continue
-            seen_client_ids.add(booking.client_id)
-            frontdesk_pairs.append((client, booking))
-            if len(frontdesk_pairs) >= 6:
-                break
-    if not frontdesk_pairs:
-        frontdesk_pairs = [(client, None) for client in active_clients[:6]]
-    frontdesk = [_client_to_frontdesk_item(client, booking) for client, booking in frontdesk_pairs]
-    frontdesk_clients = [client for client, _ in frontdesk_pairs]
+    client_by_member_id = {client.momence_member_id: client for client in client_by_id.values()}
+    frontdesk = [
+        _frontdesk_item_from_ops(arrival, client_by_member_id.get(arrival.member_id))
+        for arrival in front_desk_view.arrivals[:6]
+    ]
+    if not frontdesk:
+        frontdesk = [_client_to_frontdesk_item(client, None) for client in active_clients[:6]]
+    frontdesk_clients = [
+        client_by_member_id[arrival.member_id]
+        for arrival in front_desk_view.arrivals[:6]
+        if arrival.member_id in client_by_member_id
+    ] or active_clients[:6]
 
     sessions = []
     for session_id, session_bookings in grouped_bookings.items():

@@ -153,6 +153,11 @@ def get_front_desk_view(db: Session, day: date, location_name: str | None) -> Fr
             ClientListItem(
                 member_id=context.client.momence_member_id,
                 name=context.full_name,
+                arrival_label=(_as_utc(booking.starts_at).astimezone(LOCAL_TZ).strftime("%b %-d · %-I:%M %p") if _as_utc(booking.starts_at) else None),
+                location_name=booking.location_name,
+                class_name=booking.class_name,
+                booking_id=booking.momence_booking_id,
+                checked_in=booking.status == "checked_in",
                 membership=context.membership,
                 activity=context.activity,
                 flags=context.flags,
@@ -215,6 +220,8 @@ def get_instructor_view(
                 SessionRosterItem(
                     member_id=context.client.momence_member_id,
                     name=context.full_name,
+                    booking_id=booking.momence_booking_id,
+                    checked_in=booking.status == "checked_in",
                     birthday_this_week=context.flags.birthday_this_week,
                     milestones=[m.value or m.type for m in context.milestones],
                     injury_flag=context.flags.injury,

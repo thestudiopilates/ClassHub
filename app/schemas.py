@@ -76,6 +76,11 @@ class ConciergeSpotlight(BaseModel):
 class ClientListItem(BaseModel):
     member_id: str
     name: str
+    arrival_label: Optional[str] = None
+    location_name: Optional[str] = None
+    class_name: Optional[str] = None
+    booking_id: Optional[str] = None
+    checked_in: bool = False
     membership: MembershipSummary
     activity: ActivitySummary
     flags: FlagsSummary
@@ -95,6 +100,8 @@ class ClientListItem(BaseModel):
 class SessionRosterItem(BaseModel):
     member_id: str
     name: str
+    booking_id: Optional[str] = None
+    checked_in: bool = False
     birthday_this_week: bool = False
     milestones: List[str]
     injury_flag: bool = False
