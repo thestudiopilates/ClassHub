@@ -500,6 +500,43 @@ def _roster_sort_key(client: Client, now: datetime) -> tuple[int, str]:
     return (0 if is_featured else 1, _full_name(client).lower())
 
 
+def _build_session_card(
+    session_id: str,
+    title: str | None,
+    starts_at: datetime | None,
+    instructor_name: str | None,
+    location_name: str | None,
+    roster: list[dict[str, Any]],
+    *,
+    birthdays: int,
+    milestones_count: int,
+    special_returns: int,
+) -> dict[str, Any]:
+    return {
+        "id": session_id,
+        "title": title or "Session",
+        "time": _booking_as_local(starts_at).strftime("%-I:%M %p") if starts_at else "TBD",
+        "instructor": instructor_name or "TBD",
+        "location": location_name or "Studio",
+        "summary": [
+            {"label": "In class", "value": str(len(roster))},
+            {"label": "Milestones", "value": str(milestones_count)},
+            {"label": "Birthdays", "value": str(birthdays)},
+            {"label": "Special returns", "value": str(special_returns)},
+        ],
+        "highlights": [
+            item
+            for item in [
+                "Milestone moments" if milestones_count else None,
+                "Birthday week" if birthdays else None,
+                "Welcome-back clients" if special_returns else None,
+            ]
+            if item
+        ],
+        "roster": roster,
+    }
+
+
 def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     current_day = _resolve_demo_day(db, day)
     now = datetime.now(timezone.utc)
@@ -625,30 +662,59 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
             roster.append(_client_to_roster_item(client, booking))
 
         sessions.append(
-            {
-                "id": session_view.session_id,
-                "title": session_view.class_name or "Session",
-                "time": _booking_as_local(session_view.starts_at).strftime("%-I:%M %p"),
-                "instructor": session_view.instructor_name or "TBD",
-                "location": session_view.location_name or "Studio",
-                "summary": [
-                    {"label": "In class", "value": str(len(roster))},
-                    {"label": "Milestones", "value": str(milestones_count)},
-                    {"label": "Birthdays", "value": str(birthdays)},
-                    {"label": "Special returns", "value": str(special_returns)},
-                ],
-                "highlights": [
-                    item
-                    for item in [
-                        "Milestone moments" if milestones_count else None,
-                        "Birthday week" if birthdays else None,
-                        "Welcome-back clients" if special_returns else None,
-                    ]
-                    if item
-                ],
-                "roster": roster,
-            }
+            _build_session_card(
+                session_view.session_id,
+                session_view.class_name,
+                session_view.starts_at,
+                session_view.instructor_name,
+                session_view.location_name,
+                roster,
+                birthdays=birthdays,
+                milestones_count=milestones_count,
+                special_returns=special_returns,
+            )
         )
+
+    if not sessions and grouped_bookings:
+        for session_id, session_bookings in grouped_bookings.items():
+            first = session_bookings[0]
+            ordered_bookings = sorted(
+                session_bookings,
+                key=lambda booking: _roster_sort_key(client_by_id.get(booking.client_id), now)
+                if client_by_id.get(booking.client_id) is not None
+                else (1, ""),
+            )
+            roster = []
+            special_returns = 0
+            birthdays = 0
+            milestones_count = 0
+            for booking in ordered_bookings:
+                client = client_by_id.get(booking.client_id)
+                if client is None:
+                    continue
+                flags_summary = build_flag_summary(client, now)
+                if flags_summary.welcome_back:
+                    special_returns += 1
+                if flags_summary.birthday_this_week:
+                    birthdays += 1
+                current_milestone = _booking_milestone_label(client, booking, now)
+                if current_milestone:
+                    milestones_count += 1
+                roster.append(_client_to_roster_item(client, booking))
+
+            sessions.append(
+                _build_session_card(
+                    session_id,
+                    first.class_name,
+                    first.starts_at,
+                    first.instructor_name,
+                    first.location_name,
+                    roster,
+                    birthdays=birthdays,
+                    milestones_count=milestones_count,
+                    special_returns=special_returns,
+                )
+            )
 
     birthdays_count = db.scalar(
         select(func.count()).select_from(ClientFlag).where(ClientFlag.is_active_180d.is_(True), ClientFlag.birthday_this_week.is_(True))
