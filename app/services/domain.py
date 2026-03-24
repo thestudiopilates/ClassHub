@@ -34,6 +34,17 @@ from app.services.client_intelligence import (
     normalize_text_label,
     prefer_official_bookings,
 )
+from app.services.client_context import (
+    build_activity_summary,
+    build_badges,
+    build_flag_summary,
+    build_milestones,
+    build_notes,
+    build_preferences_summary,
+    build_profile_data_summary,
+    build_profile_response_from_context,
+    build_enriched_client_context,
+)
 from app.services.sync_state import get_freshness_map
 
 LOCAL_TZ = ZoneInfo("America/New_York")
@@ -65,178 +76,8 @@ def compute_is_active_180d(activity: ClientActivity | None, now: datetime) -> bo
     )
 
 
-def compute_birthday_flags(birthday: date | None, day: date) -> tuple[bool, bool]:
-    if birthday is None:
-        return False, False
-    today_match = (birthday.month, birthday.day) == (day.month, day.day)
-    week_end = day + timedelta(days=7)
-    def birthday_for_year(year: int) -> date:
-        try:
-            return date(year, birthday.month, birthday.day)
-        except ValueError:
-            if birthday.month == 2 and birthday.day == 29:
-                return date(year, 2, 28)
-            raise
-
-    this_year = birthday_for_year(day.year)
-    next_date = this_year if this_year >= day else birthday_for_year(day.year + 1)
-    return today_match, day <= next_date <= week_end
-
-
-def compute_churn_risk(activity: ClientActivity | None, now: datetime) -> str | None:
-    if activity is None or not activity.has_active_membership:
-        return None
-    next_booking_at = _as_utc(activity.next_booking_at)
-    if next_booking_at and next_booking_at >= now:
-        return "low"
-    current_30 = activity.visits_last_30d or 0
-    previous_30 = activity.visits_previous_30d or 0
-    if previous_30 > 0:
-        change_ratio = current_30 / previous_30
-        if change_ratio <= 0.5:
-            return "high"
-        if change_ratio < 0.8:
-            return "medium"
-        return "low"
-    reference = _as_utc(activity.last_checkin_at) or _as_utc(activity.last_booking_at)
-    if reference is None:
-        return "high"
-    days_since = (now - reference).days
-    if days_since >= 21:
-        return "high"
-    if days_since >= 14:
-        return "medium"
-    return "low"
-
-
-def build_flag_summary(client: Client, now: datetime) -> FlagsSummary:
-    today = now.date()
-    birthday_today, birthday_this_week = compute_birthday_flags(client.birthday, today)
-    activity = client.activity
-    injury = any(note.is_injury_flag for note in client.notes)
-    total_visits, current_30, previous_30 = _visit_counts(client, now)
-    new_client = bool(activity and total_visits <= 1)
-    welcome_back = False
-    last_checkin_at = _as_utc(activity.last_checkin_at) if activity else None
-    next_booking_at = _as_utc(activity.next_booking_at) if activity else None
-    if last_checkin_at and next_booking_at:
-        welcome_back = (next_booking_at - last_checkin_at).days >= 30
-
-    return FlagsSummary(
-        birthday_today=birthday_today,
-        birthday_this_week=birthday_this_week,
-        injury=injury,
-        welcome_back=welcome_back,
-        new_client=new_client,
-        churn_risk=(
-            "low"
-            if activity and (_as_utc(activity.next_booking_at) and _as_utc(activity.next_booking_at) >= now)
-            else (
-                "high"
-                if previous_30 > 0 and current_30 / previous_30 <= 0.5
-                else "medium"
-                if previous_30 > 0 and current_30 / previous_30 < 0.8
-                else compute_churn_risk(activity, now)
-            )
-        ),
-    )
-
-
-def build_membership_summary(client: Client) -> MembershipSummary:
-    activity = client.activity
-    return MembershipSummary(
-        active=bool(activity and activity.has_active_membership),
-        name=activity.active_membership_name if activity else None,
-    )
-
-
-def build_activity_summary(client: Client) -> ActivitySummary:
-    activity = client.activity
-    if activity is None and not getattr(client, "bookings", None):
-        return ActivitySummary()
-    now = datetime.now(timezone.utc)
-    total_visits, current_30, previous_30 = _visit_counts(client, now)
-    return ActivitySummary(
-        last_checkin_at=activity.last_checkin_at if activity else None,
-        last_booking_at=activity.last_booking_at if activity else None,
-        next_booking_at=activity.next_booking_at if activity else None,
-        total_visits=total_visits,
-        lifetime_visits=total_visits,
-        visits_last_30d=current_30,
-        visits_previous_30d=previous_30,
-    )
-
-
-def build_milestones(client: Client, now: datetime) -> list[MilestoneSummary]:
-    milestones: list[MilestoneSummary] = [
-        MilestoneSummary(type=item.milestone_type, value=item.milestone_value, date=item.milestone_date)
-        for item in client.milestones
-        if item.is_current
-    ]
-    total_visits, _, _ = _visit_counts(client, now)
-    if total_visits in VISIT_MILESTONES:
-        milestones.append(
-            MilestoneSummary(
-                type="visit_count",
-                value=f"{total_visits}th class",
-                date=now.date(),
-            )
-        )
-    return milestones
-
-
-def build_notes(client: Client) -> list[NoteSummary]:
-    return [NoteSummary(type=note.note_type, text=note.note_text) for note in client.notes]
-
-
-def build_profile_data_summary(client: Client) -> ProfileDataSummary:
-    profile_data = client.profile_data
-    if profile_data is None:
-        return ProfileDataSummary()
-    return ProfileDataSummary(
-        fun_fact=profile_data.fun_fact,
-        pregnant_status=profile_data.pregnant_status,
-        pregnancy_due_date=profile_data.pregnancy_due_date,
-        heard_about_us=profile_data.heard_about_us,
-    )
-
-
-def build_preferences_summary(client: Client) -> PreferencesSummary:
-    preferences = client.preferences
-    if preferences is None:
-        return PreferencesSummary()
-    return PreferencesSummary(
-        favorite_time_of_day=preferences.favorite_time_of_day,
-        favorite_weekdays=[item for item in (preferences.favorite_weekdays or "").split("|") if item],
-        favorite_instructors=[
-            item for raw in (preferences.favorite_instructors or "").split("|") if (item := normalize_text_label(raw))
-        ],
-        favorite_formats=[
-            item for raw in (preferences.favorite_formats or "").split("|") if (item := normalize_format_label(raw))
-        ],
-        preference_basis=preferences.preference_basis,
-    )
-
-
 def build_client_profile(client: Client, now: datetime) -> ClientProfileResponse:
-    full_name = client.full_name or " ".join(part for part in [client.first_name, client.last_name] if part).strip()
-    return ClientProfileResponse(
-        member_id=client.momence_member_id,
-        first_name=client.first_name,
-        last_name=client.last_name,
-        full_name=full_name,
-        email=client.email,
-        phone=client.phone,
-        birthday=client.birthday,
-        membership=build_membership_summary(client),
-        activity=build_activity_summary(client),
-        flags=build_flag_summary(client, now),
-        profile_data=build_profile_data_summary(client),
-        preferences=build_preferences_summary(client),
-        milestones=build_milestones(client, now),
-        notes=build_notes(client),
-        freshness={},
-    )
+    return build_profile_response_from_context(build_enriched_client_context(client, now))
 
 
 def get_client_profile(db: Session, momence_member_id: str) -> ClientProfileResponse | None:
@@ -300,21 +141,25 @@ def get_front_desk_view(db: Session, day: date, location_name: str | None) -> Fr
     clients = {client.id: client for client in db.scalars(clients_stmt).all()}
     now = datetime.now(timezone.utc)
 
-    arrivals = [
-        ClientListItem(
-            member_id=client.momence_member_id,
-            name=client.full_name or " ".join(filter(None, [client.first_name, client.last_name])),
-            membership=build_membership_summary(client),
-            activity=build_activity_summary(client),
-            flags=build_flag_summary(client, now),
-            profile_data=build_profile_data_summary(client),
-            preferences=build_preferences_summary(client),
-            milestones=build_milestones(client, now),
-            notes=build_notes(client),
+    arrivals = []
+    for booking in bookings:
+        client = clients.get(booking.client_id)
+        if client is None:
+            continue
+        context = build_enriched_client_context(client, now)
+        arrivals.append(
+            ClientListItem(
+                member_id=context.client.momence_member_id,
+                name=context.full_name,
+                membership=context.membership,
+                activity=context.activity,
+                flags=context.flags,
+                profile_data=context.profile_data,
+                preferences=context.preferences,
+                milestones=context.milestones,
+                notes=context.notes,
+            )
         )
-        for booking in bookings
-        if (client := clients.get(booking.client_id)) is not None
-    ]
     return FrontDeskResponse(date=day, arrivals=arrivals, freshness=get_freshness_map(db, now))
 
 
@@ -355,18 +200,19 @@ def get_instructor_view(
             client = clients.get(booking.client_id)
             if client is None:
                 continue
-            flags = build_flag_summary(client, now)
+            context = build_enriched_client_context(client, now)
             roster.append(
                 SessionRosterItem(
-                    member_id=client.momence_member_id,
-                    name=client.full_name or " ".join(filter(None, [client.first_name, client.last_name])),
-                    birthday_this_week=flags.birthday_this_week,
-                    milestones=[m.value or m.type for m in build_milestones(client, now)],
-                    injury_flag=flags.injury,
-                    instructor_notes=[note.note_text for note in client.notes if note.is_instructor_flag or note.is_injury_flag],
-                    new_client=flags.new_client,
-                    welcome_back=flags.welcome_back,
-                    total_visits=build_activity_summary(client).total_visits or 0,
+                    member_id=context.client.momence_member_id,
+                    name=context.full_name,
+                    birthday_this_week=context.flags.birthday_this_week,
+                    milestones=[m.value or m.type for m in context.milestones],
+                    injury_flag=context.flags.injury,
+                    instructor_notes=[note.text for note in context.notes if note.type in {"instructor", "injury"}]
+                    or [note.note_text for note in client.notes if note.is_instructor_flag or note.is_injury_flag],
+                    new_client=context.flags.new_client,
+                    welcome_back=context.flags.welcome_back,
+                    total_visits=context.activity.total_visits or 0,
                 )
             )
         sessions.append(

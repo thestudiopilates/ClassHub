@@ -23,6 +23,19 @@ from app.services.client_intelligence import (
     normalize_text_label as _normalize_preference_label,
     prefer_official_bookings as _prefer_official_bookings,
 )
+from app.services.client_context import (
+    active_membership_label as _active_membership_label,
+    booking_milestone_label as _booking_milestone_label,
+    build_badges as _build_badges,
+    build_enriched_client_context,
+    booking_snapshot,
+    churn_reason as _churn_reason,
+    join_date_label as _join_date_label,
+    membership_expiration_context as _membership_expiration_context,
+    membership_fit_summary as _membership_fit_summary,
+    profile_chips as _profile_chips,
+    visit_breakdowns as _visit_breakdowns,
+)
 from app.services.domain import build_client_profile, build_flag_summary, build_milestones
 from app.services.sync_state import get_freshness_map
 
@@ -45,16 +58,6 @@ def _risk_rank(level: str | None) -> int:
         return 1
     return 0
 
-def _join_date_label(client: Client) -> str:
-    attended = _attended_bookings(client)
-    if attended:
-        return _booking_as_local(attended[0].starts_at).strftime("%b %-d, %Y")
-    activity = client.activity
-    if activity is None or activity.first_visit_at is None:
-        return "Join date still loading"
-    return _booking_as_local(activity.first_visit_at).strftime("%b %-d, %Y")
-
-
 def _membership_sort_key(value) -> datetime:
     fallback = datetime.min.replace(tzinfo=timezone.utc)
     candidate = value.started_at or value.ended_at or value.source_updated_at
@@ -76,20 +79,6 @@ def _active_memberships(client: Client) -> list:
     return active
 
 
-def _active_membership_label(client: Client) -> str | None:
-    memberships = _active_memberships(client)
-    if memberships:
-        return memberships[0].membership_name or "Active membership"
-    if client.memberships:
-        memberships = sorted(client.memberships, key=_membership_sort_key, reverse=True)
-        first = memberships[0]
-        if first.membership_name:
-            return first.membership_name
-    if client.activity and client.activity.active_membership_name:
-        return client.activity.active_membership_name
-    return None
-
-
 def _current_membership_record(client: Client):
     memberships = _active_memberships(client)
     if memberships:
@@ -98,28 +87,6 @@ def _current_membership_record(client: Client):
         memberships = sorted(client.memberships, key=_membership_sort_key, reverse=True)
         return memberships[0]
     return None
-
-
-def _membership_expiration_context(client: Client) -> str | None:
-    membership = _current_membership_record(client)
-    if membership is None:
-        return None
-    bits: list[str] = []
-    if membership.is_frozen:
-        bits.append("Frozen")
-    if membership.classes_left is not None:
-        bits.append(f"{membership.classes_left} classes left")
-    if membership.ended_at is not None:
-        end_label = _booking_as_local(membership.ended_at).strftime("%b %-d")
-        if membership.renewal_cancelled:
-            bits.append(f"Ends {end_label}")
-        else:
-            name = (membership.membership_name or "").lower()
-            if "pack" in name or "credit" in name or membership.classes_left is not None:
-                bits.append(f"Expires {end_label}")
-            else:
-                bits.append(f"Through {end_label}")
-    return " · ".join(bits) if bits else None
 
 
 def _booking_class_number_today(client: Client, booking: Booking | None, now: datetime) -> int | None:
@@ -228,88 +195,6 @@ def _resolve_demo_day(db: Session, requested_day: date | None) -> date:
         return _as_local(latest_start).date()
 
     return current_day
-def _churn_reason(client: Client, flags_summary) -> tuple[str, str]:
-    activity = client.activity
-    current_30, previous_30 = _canonical_visit_windows(client)
-    if flags_summary.new_client:
-        return (
-            "New client with an early visit pattern still forming.",
-            "New client baseline. Do not overreact until more booking history is established.",
-        )
-    if previous_30 > 0:
-        if flags_summary.churn_risk == "high":
-            return (
-                f"High risk because the last 30 days dropped to {current_30} visits from {previous_30} in the previous 30 days.",
-                "High risk when the last 30 days are 50% or less of the previous 30-day window.",
-            )
-        if flags_summary.churn_risk == "medium":
-            return (
-                f"Medium risk because the last 30 days are at {current_30} visits versus {previous_30} in the previous 30 days.",
-                "Medium risk when the last 30 days fall below 80% of the previous 30-day window.",
-            )
-        return (
-            f"Low risk because the last 30 days are holding at {current_30} visits versus {previous_30} in the previous 30 days.",
-            "Low risk when the last 30 days are at least 80% of the previous 30-day window.",
-        )
-    if flags_summary.churn_risk == "high":
-        last_seen = _format_date_label(activity.last_checkin_at if activity else None)
-        return (
-            f"High risk because engagement has dropped and the client has not checked in recently ({last_seen}).",
-            "Temporary rule while live booking history is still being connected. Upgrade next to month-over-month booking decline.",
-        )
-    if flags_summary.churn_risk == "medium":
-        return (
-            "Medium risk because recent activity is softer than expected for an active client.",
-            "Temporary rule while live booking history is still being connected. Upgrade next to month-over-month booking decline.",
-        )
-    return (
-        "Low risk because recent activity is stable or a future booking is already on the calendar.",
-        "Low risk when attendance is recent or a next booking exists.",
-    )
-
-
-def _profile_chips(client: Client, flags_summary) -> list[str]:
-    chips: list[str] = []
-    milestones = build_milestones(client, datetime.now(timezone.utc))
-    display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
-    if display_milestone:
-        chips.append(f"Celebrate {display_milestone.value or display_milestone.type}")
-    if client.profile_data and client.profile_data.fun_fact:
-        chips.append("Reference fun fact")
-    if flags_summary.welcome_back:
-        chips.append("Welcome back gently")
-    if flags_summary.new_client:
-        chips.append("Guide next booking")
-    if client.profile_data and client.profile_data.pregnant_status:
-        chips.append("Offer thoughtful modifications")
-    if not chips:
-        chips.append("Personal welcome")
-    if len(chips) == 1:
-        chips.append("Confirm how class felt")
-    if len(chips) == 2:
-        chips.append("Keep service personal")
-    return chips[:3]
-
-
-def _build_badges(client: Client, flags_summary) -> list[dict[str, str]]:
-    badges: list[dict[str, str]] = []
-    milestones = build_milestones(client, datetime.now(timezone.utc))
-    display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
-    if display_milestone:
-        badges.append({"label": display_milestone.value or display_milestone.type, "tone": "birthday"})
-    if flags_summary.birthday_this_week:
-        badges.append({"label": "Birthday week", "tone": "birthday"})
-    if flags_summary.welcome_back:
-        badges.append({"label": "Return moment", "tone": "info"})
-    if flags_summary.new_client:
-        badges.append({"label": "New client", "tone": "info"})
-    if flags_summary.churn_risk == "high":
-        badges.append({"label": "High risk", "tone": "risk"})
-    elif flags_summary.churn_risk == "medium":
-        badges.append({"label": "Medium risk", "tone": "risk"})
-    elif flags_summary.churn_risk == "low":
-        badges.append({"label": "Low risk", "tone": "positive"})
-    return badges[:3]
 
 
 def _profile_details(client: Client, churn_level: str, current_reason: str) -> list[dict[str, str]]:
@@ -368,74 +253,6 @@ def _top_count_lines(counter: Counter[str], *, limit: int = 3) -> list[str]:
     if not counter:
         return ["Still learning"]
     return [f"{label} ({count})" for label, count in counter.most_common(limit)]
-
-def _membership_fit_summary(client: Client) -> dict[str, str]:
-    membership_name = _active_membership_label(client)
-    if not membership_name:
-        return {
-            "title": "Membership fit",
-            "value": "No active membership on file",
-            "note": "Use recent attendance to suggest the best next option.",
-        }
-
-    visits_last_30, _ = _canonical_visit_windows(client)
-    normalized = membership_name.lower()
-    expiration = _membership_expiration_context(client)
-
-    if "unlimited" in normalized:
-        if visits_last_30 >= 8:
-            note = f"{visits_last_30} visits in the last 30 days. Unlimited looks like a strong fit."
-        elif visits_last_30 >= 4:
-            note = f"{visits_last_30} visits in the last 30 days. Still reasonable, but worth monitoring."
-        else:
-            note = f"{visits_last_30} visits in the last 30 days. A smaller recurring option or pack may fit better."
-        if expiration:
-            note = f"{note} {expiration}."
-        return {"title": membership_name, "value": "Current plan fit", "note": note}
-
-    expected_classes = None
-    patterns = [
-        r"(\d+)\s*x\s*month",
-        r"(\d+)\s*class\s*pack",
-        r"(\d+)\s*class",
-        r"single\s*class",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, normalized)
-        if not match:
-            continue
-        if pattern == r"single\s*class":
-            expected_classes = 1
-        else:
-            expected_classes = int(match.group(1))
-        break
-
-    if expected_classes is not None:
-        if visits_last_30 >= expected_classes:
-            note = f"{visits_last_30} visits in the last 30 days against a {expected_classes}-class plan. They are at or above plan pace."
-        elif visits_last_30 >= max(expected_classes - 2, 1):
-            note = f"{visits_last_30} visits in the last 30 days against a {expected_classes}-class plan. This looks like a healthy fit."
-        else:
-            note = f"{visits_last_30} visits in the last 30 days against a {expected_classes}-class plan. They may be under-using this membership."
-        if expiration:
-            note = f"{note} {expiration}."
-        return {"title": membership_name, "value": "Current plan fit", "note": note}
-
-    if "pack" in normalized:
-        if visits_last_30 >= 8:
-            note = f"{visits_last_30} visits in the last 30 days. A monthly membership may be a better fit than a pack."
-        else:
-            note = f"{visits_last_30} visits in the last 30 days. Pack usage still looks reasonable."
-        if expiration:
-            note = f"{note} {expiration}."
-        return {"title": membership_name, "value": "Current plan fit", "note": note}
-
-    return {
-        "title": membership_name,
-        "value": "Current plan fit",
-        "note": f"{visits_last_30} visits in the last 30 days. Good candidate for a manual membership-fit review." + (f" {expiration}." if expiration else ""),
-    }
-
 
 def _celebration_spotlight(client: Client, booking: Booking | None, now: datetime) -> dict[str, str]:
     flags_summary = build_flag_summary(client, now)
@@ -507,79 +324,26 @@ def _membership_history_lines(client: Client) -> list[str]:
     return lines
 
 
-def _visit_breakdowns(client: Client, now: datetime) -> list[dict[str, Any]]:
-    history = _history_bookings(client, now)
-    instructor_counts: Counter[str] = Counter()
-    instructor_labels: dict[str, Counter[str]] = defaultdict(Counter)
-    weekday_counts: Counter[str] = Counter()
-    format_counts: Counter[str] = Counter()
-
-    for booking in history:
-        instructor_name = _normalize_preference_label(booking.instructor_name)
-        class_name = _normalize_format_label(booking.class_name)
-        if instructor_name:
-            instructor_key = _normalize_instructor_key(instructor_name)
-            if instructor_key:
-                instructor_counts[instructor_key] += 1
-                instructor_labels[instructor_key][instructor_name] += 1
-        if class_name:
-            format_counts[class_name] += 1
-        starts_local = _booking_as_local(booking.starts_at)
-        if starts_local is not None:
-            weekday_counts[starts_local.strftime("%A")] += 1
-
-    membership_fit = _membership_fit_summary(client)
-    instructor_lines = (
-        [f"{instructor_labels[key].most_common(1)[0][0]} ({count})" for key, count in instructor_counts.most_common(3)]
-        if instructor_counts
-        else ["Still learning"]
-    )
-    return [
-        {
-            "title": "Visits by instructor",
-            "items": instructor_lines,
-        },
-        {
-            "title": "Visits by weekday",
-            "items": _top_count_lines(weekday_counts),
-        },
-        {
-            "title": "Visits by format",
-            "items": _top_count_lines(format_counts),
-        },
-        {
-            "title": "Membership history",
-            "items": _membership_history_lines(client),
-        },
-        {
-            "title": membership_fit["title"],
-            "items": [membership_fit["value"], membership_fit["note"]],
-        },
-    ]
-
-
 def _client_to_demo_person(client: Client) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    flags_summary = build_flag_summary(client, now)
-    churn_reason, churn_rule = _churn_reason(client, flags_summary)
-    chips = _profile_chips(client, flags_summary)
-    notes = [note.note_text for note in client.notes[:3]] or ["Warm personal acknowledgment is the main service move here."]
+    context = build_enriched_client_context(client, now)
+    notes = [note.text for note in context.notes[:3]] or ["Warm personal acknowledgment is the main service move here."]
     return {
         "id": _slug_client(client),
-        "name": _full_name(client),
-        "membership": _active_membership_label(client) or "No active membership",
-        "funFact": client.profile_data.fun_fact if client.profile_data and client.profile_data.fun_fact else "No fun fact collected yet",
+        "name": context.full_name,
+        "membership": context.active_membership_name or "No active membership",
+        "funFact": context.profile_data.fun_fact or "No fun fact collected yet",
         "churnRisk": {
-            "level": flags_summary.churn_risk or ("new" if flags_summary.new_client else "low"),
-            "reason": churn_reason,
-            "rule": churn_rule,
+            "level": context.flags.churn_risk or ("new" if context.flags.new_client else "low"),
+            "reason": context.churn_reason,
+            "rule": context.churn_rule,
         },
         "profile": {
-            "firstName": client.first_name or _full_name(client).split(" ")[0],
-            "fullName": _full_name(client),
+            "firstName": client.first_name or context.full_name.split(" ")[0],
+            "fullName": context.full_name,
             "subtext": notes[0],
-            "details": _profile_details(client, flags_summary.churn_risk or "new", churn_reason),
-            "chips": chips,
+            "details": _profile_details(client, context.flags.churn_risk or "new", context.churn_reason),
+            "chips": context.concierge_chips,
             "notes": notes,
         },
     }
@@ -587,11 +351,9 @@ def _client_to_demo_person(client: Client) -> dict[str, Any]:
 
 def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    flags_summary = build_flag_summary(client, now)
-    milestones = build_milestones(client, now)
-    booking_milestone = _booking_milestone_label(client, booking, now)
-    display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
-    class_number_today = _booking_class_number_today(client, booking, now)
+    context = build_enriched_client_context(client, now)
+    snapshot = booking_snapshot(context, booking)
+    display_milestone = next((item for item in context.milestones if item.type != "visit_count"), None)
     booking_time = booking.starts_at if booking is not None else (client.activity.next_booking_at if client.activity else None)
     arrival = _format_booking_label(booking_time)
     if arrival == "Recently active":
@@ -599,94 +361,82 @@ def _client_to_frontdesk_item(client: Client, booking: Booking | None = None) ->
     notes = []
     if booking and booking.class_name:
         notes.append(booking.class_name)
-    if booking_milestone:
-        notes.append(booking_milestone)
-    elif class_number_today is not None:
-        notes.append(f"{_ordinal_label(class_number_today)} class today")
+    if snapshot["booking_milestone"]:
+        notes.append(snapshot["booking_milestone"])
+    elif snapshot["class_number_label"] is not None:
+        notes.append(f"{snapshot['class_number_label']} class today")
     elif display_milestone:
         notes.append(display_milestone.value or display_milestone.type)
-    if flags_summary.birthday_this_week:
+    if context.flags.birthday_this_week:
         notes.append("Birthday this week")
-    if flags_summary.welcome_back:
+    if context.flags.welcome_back:
         notes.append("First visit back after a gap")
     if not notes:
         notes = ["Active client", "Warm check-in opportunity"]
-    lifetime_visits = _canonical_client_lifetime_visits(client, now)
-    current_30, previous_30 = _canonical_visit_windows(client, now)
     return {
         "id": _slug_client(client),
         "arrival": arrival,
-        "location": booking.location_name if booking is not None else None,
-        "bookingId": booking.momence_booking_id if booking is not None else None,
-        "checkedIn": booking.status == "checked_in" if booking is not None else False,
+        "location": snapshot["location"],
+        "bookingId": snapshot["booking_id"],
+        "checkedIn": snapshot["checked_in"],
         "notes": notes[:3],
         "metrics": [
-            {"label": "Lifetime", "value": str(lifetime_visits)},
-            {"label": "Last 30", "value": str(current_30)},
-            {"label": "Prev 30", "value": str(previous_30)},
+            {"label": "Lifetime", "value": str(context.activity.total_visits)},
+            {"label": "Last 30", "value": str(context.activity.visits_last_30d)},
+            {"label": "Prev 30", "value": str(context.activity.visits_previous_30d)},
             {"label": "Last seen", "value": _format_date_label(client.activity.last_checkin_at if client.activity else None)},
         ],
-        "badges": _build_badges(client, flags_summary),
+        "badges": _build_badges(client, context.flags, now),
     }
 
 
 def _client_to_roster_item(client: Client, booking: Booking | None = None) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    flags_summary = build_flag_summary(client, now)
-    milestones = build_milestones(client, now)
-    booking_milestone = _booking_milestone_label(client, booking, now)
-    class_number_today = _booking_class_number_today(client, booking, now)
-    display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
+    context = build_enriched_client_context(client, now)
+    snapshot = booking_snapshot(context, booking)
+    display_milestone = next((item for item in context.milestones if item.type != "visit_count"), None)
     visible_highlights: list[dict[str, str]] = []
-    if booking_milestone:
-        visible_highlights.append({"label": "Milestone", "value": booking_milestone})
-    elif class_number_today == 1:
+    if snapshot["booking_milestone"]:
+        visible_highlights.append({"label": "Milestone", "value": snapshot["booking_milestone"]})
+    elif snapshot["class_number_today"] == 1:
         visible_highlights.append({"label": "Today", "value": "1st class today. Make the first visit feel personal and calm."})
     elif display_milestone:
         visible_highlights.append({"label": "Milestone", "value": display_milestone.value or display_milestone.type})
-    if flags_summary.welcome_back:
+    if context.flags.welcome_back:
         visible_highlights.append({"label": "Return marker", "value": "Welcome-back moment after time away."})
-    if flags_summary.birthday_this_week:
+    if context.flags.birthday_this_week:
         visible_highlights.append({"label": "Birthday", "value": "Birthday this week. A small personal acknowledgment will land well."})
-    if client.notes:
-        visible_highlights.append({"label": "Assumption", "value": client.notes[0].note_text})
+    if context.notes:
+        visible_highlights.append({"label": "Assumption", "value": context.notes[0].text})
     if not visible_highlights:
         visible_highlights.append({"label": "Assumption", "value": "Warm, personal coaching is likely to be the highest-impact move."})
-    favorite_time = client.preferences.favorite_time_of_day if client.preferences and client.preferences.favorite_time_of_day else "Still learning"
-    favorite_instructors = (
-        [item for item in (client.preferences.favorite_instructors or "").split("|") if item]
-        if client.preferences
-        else []
-    )
-    lifetime_visits = _canonical_client_lifetime_visits(client, now)
-    current_30, previous_30 = _canonical_visit_windows(client, now)
     return {
         "personId": _slug_client(client),
-        "bookingId": booking.momence_booking_id if booking is not None else None,
-        "checkedIn": booking.status == "checked_in" if booking is not None else False,
+        "bookingId": snapshot["booking_id"],
+        "checkedIn": snapshot["checked_in"],
         "badges": (
-            [{"label": booking_milestone, "tone": "birthday"}] + _build_badges(client, flags_summary)
-            if booking_milestone
-            else _build_badges(client, flags_summary)
+            [{"label": snapshot["booking_milestone"], "tone": "birthday"}] + _build_badges(client, context.flags, now)
+            if snapshot["booking_milestone"]
+            else _build_badges(client, context.flags, now)
         )[:3],
         "visibleHighlights": visible_highlights[:2],
         "stats": [
-            {"label": "Lifetime", "value": str(lifetime_visits)},
-            {"label": "Last 30", "value": str(current_30)},
-            {"label": "Prev 30", "value": str(previous_30)},
-            {"label": "Risk", "value": (flags_summary.churn_risk or ("new" if flags_summary.new_client else "low")).title()},
+            {"label": "Lifetime", "value": str(context.activity.total_visits)},
+            {"label": "Last 30", "value": str(context.activity.visits_last_30d)},
+            {"label": "Prev 30", "value": str(context.activity.visits_previous_30d)},
+            {"label": "Risk", "value": (context.flags.churn_risk or ("new" if context.flags.new_client else "low")).title()},
         ],
         "expand": {
-            "assumption": client.notes[0].note_text if client.notes else "Use concise encouragement and contextual warmth.",
-            "service": _profile_chips(client, flags_summary)[0],
+            "assumption": context.notes[0].text if context.notes else "Use concise encouragement and contextual warmth.",
+            "service": context.concierge_chips[0],
             "celebrationSpotlight": _celebration_spotlight(client, booking, now),
-            "membershipSpotlight": _membership_fit_summary(client),
+            "membershipSpotlight": context.membership_spotlight,
             "breakdowns": _visit_breakdowns(client, now),
             "notes": [
                 item
                 for item in [
-                    f"Today's class number: {_ordinal_label(class_number_today)}"
-                    if class_number_today is not None
+                    f"Today's class number: {snapshot['class_number_label']}"
+                    if snapshot["class_number_label"] is not None
                     else None,
                 ]
                 if item
