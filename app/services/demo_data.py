@@ -178,21 +178,29 @@ def _local_day_bounds(day: date) -> tuple[datetime, datetime]:
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 
-def _resolve_demo_day(db: Session, requested_day: date | None) -> date:
+def _resolve_demo_day(db: Session, requested_day: date | None, now_local: datetime | None = None) -> date:
     if requested_day is not None:
         return requested_day
 
-    current_day = datetime.now(LOCAL_TZ).date()
+    current_local = now_local or datetime.now(LOCAL_TZ)
+    current_day = current_local.date()
     start_dt, end_dt = _local_day_bounds(current_day)
-    has_current_day_bookings = db.scalar(
-        select(func.count())
-        .select_from(Booking)
-        .where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
+    current_day_bookings = _prefer_official_bookings(
+        db.scalars(
+            select(Booking)
+            .where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
+            .order_by(Booking.starts_at)
+        ).all()
     )
-    if has_current_day_bookings:
+    if _filter_relevant_bookings(current_day_bookings, current_day, now_local=current_local):
         return current_day
 
-    next_start = db.scalar(select(Booking.starts_at).where(Booking.starts_at >= start_dt).order_by(Booking.starts_at).limit(1))
+    next_start = db.scalar(
+        select(Booking.starts_at)
+        .where(Booking.starts_at >= end_dt)
+        .order_by(Booking.starts_at)
+        .limit(1)
+    )
     if next_start is not None:
         return _as_local(next_start).date()
 

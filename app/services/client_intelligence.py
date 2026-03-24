@@ -22,7 +22,7 @@ def booking_as_local(value: datetime | None, tz_name: str = "America/New_York") 
         return None
     local_tz = ZoneInfo(tz_name)
     if value.tzinfo is None:
-        return value.replace(tzinfo=local_tz)
+        return value.replace(tzinfo=timezone.utc).astimezone(local_tz)
     return value.astimezone(local_tz)
 
 
