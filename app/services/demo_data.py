@@ -456,6 +456,9 @@ def _client_to_roster_item(client: Client, booking: Booking | None = None) -> di
         "personId": _slug_client(client),
         "bookingId": snapshot["booking_id"],
         "checkedIn": snapshot["checked_in"],
+        "classNumberToday": snapshot["class_number_today"],
+        "bookingMilestone": snapshot["booking_milestone"],
+        "birthdayToday": context.flags.birthday_today,
         "badges": (
             [{"label": snapshot["booking_milestone"], "tone": "birthday"}] + _build_badges(client, context.flags, now)
             if snapshot["booking_milestone"]
@@ -638,11 +641,6 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     ]
     if not frontdesk:
         frontdesk = [_client_to_frontdesk_item(client, None) for client in active_clients[:6]]
-    frontdesk_clients = [
-        client_by_member_id[arrival.member_id]
-        for arrival in front_desk_view.arrivals[:6]
-        if arrival.member_id in client_by_member_id
-    ] or active_clients[:6]
 
     sessions = []
     for session_view in instructor_view.sessions:
@@ -743,10 +741,28 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
         if _booking_milestone_label(client, booking, now):
             milestone_count += 1
             seen_milestone_clients.add(client.momence_member_id)
-    special_alerts = sum(
-        1
-        for client in frontdesk_clients
-        if (client.flags and client.flags.churn_risk in {"high", "medium"}) or (client.flags and client.flags.welcome_back_flag)
+    checked_in_count = len(
+        {
+            booking.client_id
+            for booking in bookings
+            if booking.status == "checked_in"
+        }
+    )
+    new_clients_today_count = len(
+        {
+            booking.client_id
+            for booking in bookings
+            if (client := client_by_id.get(booking.client_id)) is not None
+            and _booking_class_number_today(client, booking, now) == 1
+        }
+    )
+    birthdays_today_count = len(
+        {
+            booking.client_id
+            for booking in bookings
+            if (client := client_by_id.get(booking.client_id)) is not None
+            and build_flag_summary(client, now).birthday_today
+        }
     )
 
     celebration_clients = active_clients[:8]
@@ -783,9 +799,10 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
         },
         "summary": [
             {"label": "Class live now", "value": len(sessions)},
-            {"label": "People in room", "value": sum(len(session["roster"]) for session in sessions)},
+            {"label": "People checked in", "value": checked_in_count},
+            {"label": "New clients today", "value": new_clients_today_count},
             {"label": "Milestones today", "value": milestone_count},
-            {"label": "Special alerts", "value": special_alerts},
+            {"label": "Birthdays today", "value": birthdays_today_count},
         ],
         "freshness": [
             {

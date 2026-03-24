@@ -1,9 +1,10 @@
 const fallbackData = {
   summary: [
     { label: "Class live now", value: 2 },
-    { label: "People in room", value: 11 },
+    { label: "People checked in", value: 4 },
+    { label: "New clients today", value: 2 },
     { label: "Milestones today", value: 4 },
-    { label: "Special alerts", value: 3 },
+    { label: "Birthdays today", value: 1 },
   ],
   freshness: [
     { domain: "active clients", status: "fresh", note: "updated 8m ago" },
@@ -491,29 +492,35 @@ function getFilteredSessions() {
 
 function buildLocationSummary() {
   const sessions = getFilteredSessions();
-  const frontdeskItems = getFilteredFrontdeskItems();
-  const peopleInRoom = sessions.reduce((sum, session) => sum + (session.roster?.length || 0), 0);
+  const checkedInPeople = new Set();
+  const newClientsToday = new Set();
+  const milestonePeople = new Set();
+  const birthdayPeople = new Set();
 
-  let milestoneCount = 0;
-  let specialAlerts = 0;
   for (const session of sessions) {
     for (const rosterItem of session.roster || []) {
-      const person = getPerson(rosterItem.personId);
-      const badges = rosterItem.badges || [];
-      if (badges.some((badge) => /class|milestone|birthday/i.test(badge.label))) {
-        milestoneCount += 1;
+      if (!rosterItem?.personId) continue;
+      if (rosterItem.checkedIn) {
+        checkedInPeople.add(rosterItem.personId);
       }
-      if (person?.churnRisk?.level === "high" || person?.churnRisk?.level === "medium" || badges.some((badge) => /return|back after baby/i.test(badge.label))) {
-        specialAlerts += 1;
+      if (Number(rosterItem.classNumberToday) === 1) {
+        newClientsToday.add(rosterItem.personId);
+      }
+      if (rosterItem.bookingMilestone) {
+        milestonePeople.add(rosterItem.personId);
+      }
+      if (rosterItem.birthdayToday) {
+        birthdayPeople.add(rosterItem.personId);
       }
     }
   }
 
   return [
     { label: "Class live now", value: sessions.length },
-    { label: "People in room", value: peopleInRoom },
-    { label: "Milestones today", value: milestoneCount },
-    { label: "Special alerts", value: specialAlerts || frontdeskItems.filter((item) => item.badges.some((badge) => /risk|return/i.test(badge.label))).length },
+    { label: "People checked in", value: checkedInPeople.size },
+    { label: "New clients today", value: newClientsToday.size },
+    { label: "Milestones today", value: milestonePeople.size },
+    { label: "Birthdays today", value: birthdayPeople.size },
   ];
 }
 
@@ -523,7 +530,7 @@ function renderSummary() {
   summaryStats.innerHTML = locationSummary
     .map(
       (item, index) => `
-        <article class="stat-card ${index === 2 ? "is-milestones" : index === 3 && Number(item.value) > 0 ? "is-alerts" : ""}">
+        <article class="stat-card ${index === 3 && Number(item.value) > 0 ? "is-milestones" : index === 2 ? "is-milestones" : ""}">
           <span class="metric-label">${item.label}</span>
           <strong>${item.value}</strong>
         </article>
