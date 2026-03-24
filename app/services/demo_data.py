@@ -36,7 +36,13 @@ from app.services.client_context import (
     profile_chips as _profile_chips,
     visit_breakdowns as _visit_breakdowns,
 )
-from app.services.domain import build_client_profile, build_flag_summary, build_milestones, get_front_desk_view
+from app.services.domain import (
+    build_client_profile,
+    build_flag_summary,
+    build_milestones,
+    get_front_desk_view,
+    get_instructor_view,
+)
 from app.services.sync_state import get_freshness_map
 
 LOCAL_TZ = ZoneInfo("America/New_York")
@@ -499,6 +505,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     current_day_label = datetime.combine(current_day, datetime.min.time(), tzinfo=LOCAL_TZ).strftime("%A, %B %-d")
     front_desk_view = get_front_desk_view(db, current_day, None)
+    instructor_view = get_instructor_view(db, current_day, None, None)
 
     active_stmt = (
         select(Client)
@@ -570,6 +577,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     grouped_bookings: dict[str, list[Booking]] = defaultdict(list)
     for booking in bookings:
         grouped_bookings[booking.momence_session_id].append(booking)
+    relevant_session_ids = set(grouped_bookings.keys())
 
     client_by_member_id = {client.momence_member_id: client for client in client_by_id.values()}
     frontdesk = [
@@ -585,22 +593,27 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     ] or active_clients[:6]
 
     sessions = []
-    for session_id, session_bookings in grouped_bookings.items():
-        first = session_bookings[0]
-        ordered_bookings = sorted(
-            session_bookings,
-            key=lambda booking: _roster_sort_key(client_by_id.get(booking.client_id), now)
-            if client_by_id.get(booking.client_id) is not None
-            else (1, ""),
-        )
+    for session_view in instructor_view.sessions:
+        if session_view.session_id not in relevant_session_ids:
+            continue
+        session_bookings = grouped_bookings.get(session_view.session_id, [])
+        bookings_by_id = {booking.momence_booking_id: booking for booking in session_bookings}
+        bookings_by_member = {
+            client_by_id[booking.client_id].momence_member_id: booking
+            for booking in session_bookings
+            if booking.client_id in client_by_id
+        }
         roster = []
         special_returns = 0
         birthdays = 0
         milestones_count = 0
-        for booking in ordered_bookings:
-            client = client_by_id.get(booking.client_id)
+        for roster_item in session_view.roster:
+            client = client_by_member_id.get(roster_item.member_id)
             if client is None:
                 continue
+            booking = bookings_by_id.get(roster_item.booking_id) if getattr(roster_item, "booking_id", None) else None
+            if booking is None:
+                booking = bookings_by_member.get(roster_item.member_id)
             flags_summary = build_flag_summary(client, now)
             if flags_summary.welcome_back:
                 special_returns += 1
@@ -613,11 +626,11 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
 
         sessions.append(
             {
-                "id": session_id,
-                "title": first.class_name or "Session",
-                "time": _booking_as_local(first.starts_at).strftime("%-I:%M %p"),
-                "instructor": first.instructor_name or "TBD",
-                "location": first.location_name or "Studio",
+                "id": session_view.session_id,
+                "title": session_view.class_name or "Session",
+                "time": _booking_as_local(session_view.starts_at).strftime("%-I:%M %p"),
+                "instructor": session_view.instructor_name or "TBD",
+                "location": session_view.location_name or "Studio",
                 "summary": [
                     {"label": "In class", "value": str(len(roster))},
                     {"label": "Milestones", "value": str(milestones_count)},
@@ -691,7 +704,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
         },
         "summary": [
             {"label": "Class live now", "value": len(sessions)},
-            {"label": "People in room", "value": len(bookings)},
+            {"label": "People in room", "value": sum(len(session["roster"]) for session in sessions)},
             {"label": "Milestones today", "value": milestone_count},
             {"label": "Special alerts", "value": special_alerts},
         ],
