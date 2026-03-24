@@ -184,25 +184,43 @@ def _resolve_demo_day(db: Session, requested_day: date | None, now_local: dateti
 
     current_local = now_local or datetime.now(LOCAL_TZ)
     current_day = current_local.date()
-    start_dt, end_dt = _local_day_bounds(current_day)
-    current_day_bookings = _prefer_official_bookings(
-        db.scalars(
-            select(Booking)
-            .where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
-            .order_by(Booking.starts_at)
-        ).all()
-    )
-    if _filter_relevant_bookings(current_day_bookings, current_day, now_local=current_local):
+    time_probe = current_local.timetz().replace(tzinfo=LOCAL_TZ)
+
+    def day_bookings(day: date) -> list[Booking]:
+        start_dt, end_dt = _local_day_bounds(day)
+        return _prefer_official_bookings(
+            db.scalars(
+                select(Booking)
+                .where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
+                .order_by(Booking.starts_at)
+            ).all()
+        )
+
+    def has_remaining_bookings(day: date) -> bool:
+        bookings = day_bookings(day)
+        if not bookings:
+            return False
+        effective_now = datetime.combine(day, time_probe)
+        return bool(_filter_relevant_bookings(bookings, day, now_local=effective_now))
+
+    if has_remaining_bookings(current_day):
         return current_day
 
-    next_start = db.scalar(
-        select(Booking.starts_at)
-        .where(Booking.starts_at >= end_dt)
-        .order_by(Booking.starts_at)
-        .limit(1)
-    )
+    next_start = db.scalar(select(Booking.starts_at).where(Booking.starts_at >= _local_day_bounds(current_day)[0]).order_by(Booking.starts_at).limit(1))
     if next_start is not None:
-        return _as_local(next_start).date()
+        candidate_day = _as_local(next_start).date()
+        if has_remaining_bookings(candidate_day):
+            return candidate_day
+        candidate_end = _local_day_bounds(candidate_day)[1]
+        following_start = db.scalar(
+            select(Booking.starts_at)
+            .where(Booking.starts_at >= candidate_end)
+            .order_by(Booking.starts_at)
+            .limit(1)
+        )
+        if following_start is not None:
+            return _as_local(following_start).date()
+        return candidate_day
 
     latest_start = db.scalar(select(Booking.starts_at).order_by(Booking.starts_at.desc()).limit(1))
     if latest_start is not None:
