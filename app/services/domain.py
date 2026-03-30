@@ -305,18 +305,20 @@ def refresh_all_flags(db: Session) -> int:
 def recompute_visit_window_counts(db: Session, now: datetime) -> None:
     current_start = now - timedelta(days=30)
     previous_start = now - timedelta(days=60)
-    bookings_stmt = select(Booking).where(
-        Booking.starts_at >= previous_start,
-        Booking.starts_at < now,
-        Booking.status == "checked_in",
-    )
-    bookings = db.scalars(bookings_stmt).all()
+
+    # Count all checked-in bookings (lifetime + windowed) directly from the DB
+    all_checked_in = db.scalars(
+        select(Booking).where(Booking.starts_at < now, Booking.status == "checked_in")
+    ).all()
+
+    lifetime_counts: dict[object, int] = defaultdict(int)
     counts: dict[object, dict[str, int]] = defaultdict(lambda: {"current": 0, "previous": 0})
 
-    for booking in bookings:
+    for booking in all_checked_in:
         starts_at = _as_utc(booking.starts_at)
         if starts_at is None:
             continue
+        lifetime_counts[booking.client_id] += 1
         if starts_at >= current_start:
             counts[booking.client_id]["current"] += 1
         elif starts_at >= previous_start:
@@ -325,7 +327,9 @@ def recompute_visit_window_counts(db: Session, now: datetime) -> None:
     activities = db.scalars(select(ClientActivity)).all()
     for activity in activities:
         client_counts = counts.get(activity.client_id, {"current": 0, "previous": 0})
+        db_lifetime = lifetime_counts.get(activity.client_id, 0)
         # Preserve stronger imported rollups when hosted booking history is still partial.
         activity.visits_last_30d = max(activity.visits_last_30d or 0, client_counts["current"])
         activity.visits_previous_30d = max(activity.visits_previous_30d or 0, client_counts["previous"])
+        activity.total_visits = max(activity.total_visits or 0, db_lifetime)
         db.add(activity)
