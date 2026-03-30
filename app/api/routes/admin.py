@@ -144,6 +144,33 @@ async def debug_momence_sessions(
     }
 
 
+@router.get("/debug/momence/session-bookings/{session_id}")
+async def debug_momence_session_bookings(session_id: str) -> dict:
+    client = MomenceClient()
+    bookings = await client.fetch_session_bookings(session_id)
+    roster: list[dict] = []
+    for booking in bookings:
+        member = booking.get("member") or booking.get("customer") or {}
+        roster.append(
+            {
+                "booking_id": booking.get("id"),
+                "status": booking.get("status"),
+                "checked_in": booking.get("checkedIn"),
+                "member_id": member.get("id") or booking.get("memberId") or booking.get("customerId"),
+                "full_name": member.get("fullName")
+                or " ".join(part for part in [member.get("firstName"), member.get("lastName")] if part),
+                "member": member,
+                "booking": booking,
+            }
+        )
+    roster.sort(key=lambda item: ((item.get("full_name") or "").lower(), str(item.get("member_id") or "")))
+    return {
+        "session_id": session_id,
+        "count": len(roster),
+        "roster": roster,
+    }
+
+
 @router.post("/debug/momence/import-tokens")
 def debug_import_momence_tokens(request: MomenceTokenImportRequest) -> dict:
     tokens = save_tokens(dict(request.payload))

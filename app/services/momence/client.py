@@ -268,6 +268,31 @@ class MomenceClient:
     async def fetch_upcoming_bookings(self, start: date, end: date) -> list[dict]:
         return await self.fetch_session_bookings_between(start, end)
 
+    async def fetch_session_bookings(self, session_id: str) -> list[dict]:
+        page = 0
+        page_size = 100
+        rows: list[dict] = []
+        async with await self._authorized_client() as client:
+            while True:
+                response = await client.get(
+                    f"/api/v2/host/sessions/{session_id}/bookings",
+                    params={
+                        "page": page,
+                        "pageSize": page_size,
+                        "sortBy": "createdAt",
+                        "sortOrder": "ASC",
+                        "includeCancelled": False,
+                    },
+                )
+                response.raise_for_status()
+                body = response.json()
+                items = body.get("payload", [])
+                rows.extend(items)
+                if len(items) < page_size:
+                    break
+                page += 1
+        return rows
+
     async def fetch_auth_profile(self) -> dict:
         async with await self._authorized_client() as client:
             response = await client.get("/api/v2/auth/profile")
