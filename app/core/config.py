@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     momence_allow_browser_booking_report_sync: bool = False
     momence_allow_behavior_report_sync: bool = False
     momence_preserve_canonical_history: bool = True
-    momence_upcoming_booking_days: int = 7
+    momence_upcoming_booking_days: int = 2
     momence_history_booking_days: int = 60
     momence_history_booking_chunk_days: int = 1
     momence_enable_check_in_write: bool = False
