@@ -259,6 +259,7 @@ def _normalize_membership_rows(memberships: dict | list[dict], now: datetime) ->
 def _apply_member_context(db: Session, client: Client, context: dict, now: datetime) -> int:
     notes = context.get("notes") or []
     memberships = context.get("memberships") or {}
+    profile = context.get("profile") or {}
 
     activity = client.activity
     if activity is None:
@@ -267,8 +268,47 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
     activity.has_active_membership = has_active_membership
     activity.active_membership_name = membership_name
     activity.activity_updated_at = now
+
+    # Enrich from member profile: visits, first/last seen, birthday
+    api_visits = profile.get("visits")
+    if api_visits and isinstance(api_visits, int):
+        activity.total_visits = max(activity.total_visits or 0, api_visits)
+    first_seen = _parse_iso_datetime(profile.get("firstSeen"))
+    if first_seen and (activity.first_visit_at is None or first_seen < activity.first_visit_at):
+        activity.first_visit_at = first_seen
+    last_seen = _parse_iso_datetime(profile.get("lastSeen"))
+    if last_seen:
+        activity.last_checkin_at = last_seen
+
+    # Update client birthday from profile
+    birthday_str = None
+    for field in profile.get("customerFields", []):
+        if field.get("type") == "date-of-birth" and field.get("value"):
+            birthday_str = field["value"]
+    if birthday_str:
+        try:
+            client.birthday = datetime.strptime(birthday_str, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            pass
+
     if db is not None:
         db.add(activity)
+
+    # Enrich profile data (fun fact, heard about us, pregnancy)
+    custom_fields = {f.get("label", ""): f.get("value") for f in profile.get("customerFields", [])}
+    if custom_fields:
+        profile_data = client.profile_data or ClientProfileData(client_id=client.id)
+        fun_fact = custom_fields.get("Tell us one fun fact about you!")
+        if fun_fact:
+            profile_data.fun_fact = fun_fact
+        heard = custom_fields.get("How Did You Hear About Us?")
+        if heard:
+            profile_data.heard_about_us = heard
+        pregnant = custom_fields.get("Pregnant")
+        if pregnant:
+            profile_data.pregnant_status = pregnant
+        profile_data.updated_at = now
+        db.add(profile_data)
 
     db.query(ClientMembership).filter(ClientMembership.client_id == client.id).delete()
     membership_rows = _normalize_membership_rows(memberships, now)
@@ -293,7 +333,8 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
     db.query(ClientNote).filter(ClientNote.client_id == client.id).delete()
     inserted = 0
     for note in notes:
-        note_text = (note.get("note") or note.get("notePreview") or "").strip()
+        raw_text = note.get("note") or note.get("notePreview") or ""
+        note_text = re.sub(r"<[^>]+>", "", raw_text).strip()
         if not note_text:
             continue
         injury_flag = _is_injury_note(note_text)
@@ -804,7 +845,8 @@ def refresh_clients_by_member_ids(db: Session, momence_member_ids: list[str]) ->
             try:
                 notes = asyncio.run(api_client.fetch_member_notes(member_id))
                 memberships = asyncio.run(api_client.fetch_member_memberships(member_id))
-                context = {"notes": notes, "memberships": memberships}
+                profile = asyncio.run(api_client.fetch_member_profile(member_id))
+                context = {"notes": notes, "memberships": memberships, "profile": profile}
                 records_processed += _apply_member_context(db, client_map[member_id], context, now)
             except Exception as exc:
                 failures.append(f"{member_id}: {exc}")
