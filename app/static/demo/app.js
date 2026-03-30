@@ -432,13 +432,13 @@ function buildCheckInStateFromData(sourceData) {
   return statusByBookingId;
 }
 
-let currentData = fallbackData;
+let currentData = null;
 
 const state = {
   view: "instructor",
   location: "emory",
-  selectedSessionId: fallbackData.sessions[0].id,
-  expandedRosterIds: ["monica-abdelmalak", "priya-shah"],
+  selectedSessionId: null,
+  expandedRosterIds: [],
   query: "",
   checkInByBookingId: buildInitialCheckInState(),
 };
@@ -1026,6 +1026,7 @@ function syncStateToCurrentData() {
 }
 
 function render() {
+  if (!currentData) return;
   document.querySelectorAll(".toggle").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === state.view);
   });
@@ -1055,7 +1056,8 @@ async function loadLiveDemoData() {
     syncStateToCurrentData();
     render();
   } catch (error) {
-    console.error("Falling back to local demo data", error);
+    console.error("Failed to load live data", error);
+    document.querySelector(".summary-grid").innerHTML = `<p style="grid-column:1/-1;text-align:center;color:#9F543F;padding:2rem;">Unable to load live data. Please refresh the page.</p>`;
   }
 }
 
@@ -1178,6 +1180,6 @@ searchInput.addEventListener("input", (event) => {
   render();
 });
 
-renderSummary();
-render();
+// Show loading state, then fetch live data — no fallback data shown
+document.querySelector(".summary-grid").innerHTML = `<p style="grid-column:1/-1;text-align:center;color:#28200E;padding:2rem;">Loading live data...</p>`;
 void loadLiveDemoData();
