@@ -432,7 +432,7 @@ function buildCheckInStateFromData(sourceData) {
   return statusByBookingId;
 }
 
-let currentData = null;
+let currentData = { meta: {}, summary: [], freshness: [], celebrations: [], people: {}, frontdesk: [], sessions: [] };
 
 const state = {
   view: "instructor",
@@ -1026,7 +1026,6 @@ function syncStateToCurrentData() {
 }
 
 function render() {
-  if (!currentData) return;
   document.querySelectorAll(".toggle").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === state.view);
   });
@@ -1057,7 +1056,7 @@ async function loadLiveDemoData() {
     render();
   } catch (error) {
     console.error("Failed to load live data", error);
-    document.querySelector(".summary-grid").innerHTML = `<p style="grid-column:1/-1;text-align:center;color:#9F543F;padding:2rem;">Unable to load live data. Please refresh the page.</p>`;
+    if (summaryStats) summaryStats.innerHTML = `<p style="grid-column:1/-1;text-align:center;color:#9F543F;padding:2rem;">Unable to load live data. Please refresh the page.</p>`;
   }
 }
 
@@ -1181,5 +1180,5 @@ searchInput.addEventListener("input", (event) => {
 });
 
 // Show loading state, then fetch live data — no fallback data shown
-document.querySelector(".summary-grid").innerHTML = `<p style="grid-column:1/-1;text-align:center;color:#28200E;padding:2rem;">Loading live data...</p>`;
+if (summaryStats) summaryStats.innerHTML = `<p style="grid-column:1/-1;text-align:center;color:#28200E;padding:2rem;">Loading live data...</p>`;
 void loadLiveDemoData();
