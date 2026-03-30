@@ -114,7 +114,7 @@ class MomenceClient:
                 if stored.get("access_token"):
                     return stored["access_token"]
 
-        if not all([self.client_id, self.client_secret, self.username, self.password]):
+        if not all([self.client_id, self.client_secret]):
             if stored and stored.get("access_token"):
                 return stored["access_token"]
             missing = [
@@ -122,8 +122,6 @@ class MomenceClient:
                 for name, value in [
                     ("MOMENCE_CLIENT_ID", self.client_id),
                     ("MOMENCE_CLIENT_SECRET", self.client_secret),
-                    ("MOMENCE_USERNAME", self.username),
-                    ("MOMENCE_PASSWORD", self.password),
                 ]
                 if not value
             ]
@@ -133,15 +131,22 @@ class MomenceClient:
             raise RuntimeError(message)
 
         async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as client:
+            # Use password grant if username/password available, otherwise client_credentials
+            if self.username and self.password:
+                data = {
+                    "grant_type": "password",
+                    "username": self.username,
+                    "password": self.password,
+                }
+            else:
+                data = {
+                    "grant_type": "client_credentials",
+                }
             response = await client.post(
                 "/api/v2/auth/token",
                 auth=self._basic_auth,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
-                data={
-                    "grant_type": "password",
-                    "username": self.username,
-                    "password": self.password,
-                },
+                data=data,
             )
             response.raise_for_status()
             payload = response.json()
