@@ -440,7 +440,7 @@ const state = {
   selectedSessionId: null,
   expandedRosterIds: [],
   query: "",
-  checkInByBookingId: buildInitialCheckInState(),
+  checkInByBookingId: {},
 };
 
 const summaryStats = document.getElementById("summary-stats");
