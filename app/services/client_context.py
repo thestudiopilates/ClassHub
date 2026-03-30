@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.db.models import Booking, Client
@@ -359,6 +359,20 @@ def celebration_spotlight(client: Client, booking: Booking | None, now: datetime
     next_milestone = next((value for value in sorted(VISIT_MILESTONES) if value > current_lifetime), None)
     if next_milestone is not None:
         gap = next_milestone - current_lifetime
+        # Check if tomorrow's bookings will cross the milestone
+        tomorrow = (now + timedelta(days=1)).date() if hasattr(now, 'date') else now.date() + timedelta(days=1)
+        tomorrow_bookings = [
+            b for b in getattr(client, "bookings", [])
+            if b.status != "cancelled"
+            and b.starts_at is not None
+            and booking_as_local(b.starts_at).date() == tomorrow
+        ]
+        if tomorrow_bookings and gap <= len(tomorrow_bookings):
+            return {
+                "title": "Milestone tomorrow",
+                "value": f"Hitting {next_milestone}th class tomorrow",
+                "note": f"This client reaches their {next_milestone}th class tomorrow. Prepare a celebration moment.",
+            }
         if gap <= 3:
             return {
                 "title": "Celebration",
