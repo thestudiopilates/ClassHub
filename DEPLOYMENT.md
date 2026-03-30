@@ -84,6 +84,28 @@ OPS_AUTO_WARM_MAX_BATCHES=4
 OPS_AUTO_WARM_DAY_OFFSET=0
 ```
 
+## Supabase Postgres On Railway
+
+This app talks to Postgres through `DATABASE_URL`. You do not need `@supabase/supabase-js`, Next.js middleware, or browser/client helpers unless you later add a separate frontend.
+
+For a Supabase-backed Railway deploy:
+
+1. copy the Supabase Postgres connection string
+2. put it into `DATABASE_URL` on both `classhub-web` and `classhub-sync`
+3. make sure the URL includes `sslmode=require`
+
+Typical Supabase pooled format:
+
+```text
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require
+```
+
+Notes:
+
+- Railway can use either `postgresql://...` or `postgres://...`; the app normalizes both to SQLAlchemy/psycopg format automatically
+- use the same `DATABASE_URL` on both Railway services so the web app and sync worker point at the same Supabase database
+- if Supabase gives you a direct connection string instead of the pooler, still keep `sslmode=require`
+
 ## Post-Deploy OAuth
 
 After the web service gets a public Railway URL:

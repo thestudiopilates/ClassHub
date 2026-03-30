@@ -13,6 +13,8 @@ Internal API service for:
 - SQLAlchemy
 - Postgres
 
+This is a Python backend service, not a Next.js app. If you host Postgres on Supabase, the only required integration here is setting `DATABASE_URL` to the Supabase connection string.
+
 ## Quick start
 
 1. Create a virtual environment and install dependencies.
@@ -78,6 +80,13 @@ Helpful env vars:
 - `OPS_AUTO_WARM_ENABLED=true`
 - `OPS_AUTO_WARM_MAX_BATCHES=4`
 - `OPS_AUTO_WARM_DAY_OFFSET=0`
+
+If you use Supabase for Postgres:
+
+- set `DATABASE_URL` to the Supabase connection string
+- keep `sslmode=require` on that URL
+- use the same value in both Railway services
+- skip `@supabase/supabase-js` unless you later add a separate frontend
 
 ## Railway deployment
 
