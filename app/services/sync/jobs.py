@@ -416,7 +416,7 @@ def _derive_booking_id(row: dict[str, str], starts_at: datetime | None) -> str:
 
 def _upsert_upcoming_booking_rows(db: Session, rows: list[dict[str, str]]) -> tuple[int, list[str]]:
     now = datetime.now(timezone.utc)
-    window_end = now + timedelta(days=settings.momence_upcoming_booking_days)
+    window_end = _upcoming_window_end()
     impacted_member_ids: list[str] = []
     processed = 0
     booking_map: dict[str, Booking] = {}
@@ -556,7 +556,7 @@ def _reset_session_bookings(db: Session, session_id: str) -> None:
 
 def _upsert_upcoming_bookings_from_api(db: Session, booking_rows: list[dict]) -> tuple[int, list[str]]:
     now = datetime.now(timezone.utc)
-    window_end = now + timedelta(days=settings.momence_upcoming_booking_days)
+    window_end = _upcoming_window_end()
     impacted_member_ids: list[str] = []
     processed = 0
 
@@ -713,9 +713,15 @@ def _upsert_historical_bookings_from_api(
     return processed, list(dict.fromkeys(impacted_member_ids))
 
 
+def _upcoming_window_end() -> datetime:
+    """End of tomorrow in local time — bookings are only needed for today and next day."""
+    tomorrow_local = datetime.now(LOCAL_TZ).date() + timedelta(days=1)
+    return datetime.combine(tomorrow_local, datetime.max.time(), tzinfo=LOCAL_TZ).astimezone(timezone.utc)
+
+
 def _read_upcoming_bookings_from_host_api() -> list[dict]:
     now = datetime.now(timezone.utc)
-    window_end = now + timedelta(days=settings.momence_upcoming_booking_days)
+    window_end = _upcoming_window_end()
     client = MomenceClient()
     return asyncio.run(client.fetch_upcoming_bookings(now, window_end))
 
