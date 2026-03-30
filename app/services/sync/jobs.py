@@ -798,15 +798,24 @@ def refresh_clients_by_member_ids(db: Session, momence_member_ids: list[str]) ->
 
         now = datetime.now(timezone.utc)
         records_processed = 0
+        failures: list[str] = []
         api_client = MomenceClient()
         for member_id in unique_member_ids:
-            notes = asyncio.run(api_client.fetch_member_notes(member_id))
-            memberships = asyncio.run(api_client.fetch_member_memberships(member_id))
-            context = {"notes": notes, "memberships": memberships}
-            records_processed += _apply_member_context(db, client_map[member_id], context, now)
+            try:
+                notes = asyncio.run(api_client.fetch_member_notes(member_id))
+                memberships = asyncio.run(api_client.fetch_member_memberships(member_id))
+                context = {"notes": notes, "memberships": memberships}
+                records_processed += _apply_member_context(db, client_map[member_id], context, now)
+            except Exception as exc:
+                failures.append(f"{member_id}: {exc}")
         db.commit()
         refresh_all_flags(db)
-        record_sync_state(db, "memberships_notes", status="completed", records_processed=len(unique_member_ids))
+        enrichment_status = "completed" if not failures else "partial"
+        record_sync_state(
+            db, "memberships_notes", status=enrichment_status,
+            records_processed=records_processed,
+            error_text="; ".join(failures[:5]) if failures else None,
+        )
         record_sync_state(db, "flags", status="completed", records_processed=len(unique_member_ids))
         return _finish_run(db, run, "completed", records_processed)
     except Exception as exc:  # pragma: no cover - targeted browser integration

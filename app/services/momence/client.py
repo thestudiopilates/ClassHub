@@ -366,7 +366,8 @@ class MomenceClient:
                 f"/api/v2/host/members/{momence_member_id}/bought-memberships/active",
                 params={"includeFrozen": "false"},
             )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                return []
             body = response.json()
         if isinstance(body, list):
             return body
