@@ -70,7 +70,8 @@ def _upsert_customer(db: Session, customer: dict) -> None:
     activity.last_checkin_at = _parse_datetime(customer.get("lastSeen"))
     activity.last_booking_at = activity.last_checkin_at
     activity.activity_updated_at = datetime.now(timezone.utc)
-    db.add(activity)
+    if db is not None:
+        db.add(activity)
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -266,7 +267,8 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
     activity.has_active_membership = has_active_membership
     activity.active_membership_name = membership_name
     activity.activity_updated_at = now
-    db.add(activity)
+    if db is not None:
+        db.add(activity)
 
     db.query(ClientMembership).filter(ClientMembership.client_id == client.id).delete()
     membership_rows = _normalize_membership_rows(memberships, now)
@@ -866,11 +868,18 @@ def _recompute_client_activity_from_bookings(db: Session, client: Client, now: d
     if activity is None:
         activity = ClientActivity(client_id=client.id)
 
-    bookings = db.scalars(
-        select(Booking)
-        .where(Booking.client_id == client.id, Booking.status != "cancelled")
-        .order_by(Booking.starts_at.asc())
-    ).all()
+    loaded_bookings = getattr(client, "bookings", None)
+    if loaded_bookings:
+        bookings = sorted(
+            [booking for booking in loaded_bookings if booking.status != "cancelled"],
+            key=lambda booking: _as_utc(booking.starts_at) or now,
+        )
+    else:
+        bookings = db.scalars(
+            select(Booking)
+            .where(Booking.client_id == client.id, Booking.status != "cancelled")
+            .order_by(Booking.starts_at.asc())
+        ).all()
 
     if bookings:
         non_cancelled = [booking for booking in bookings if booking.status != "cancelled"]
@@ -883,14 +892,39 @@ def _recompute_client_activity_from_bookings(db: Session, client: Client, now: d
             if (_as_utc(booking.starts_at) or now) <= now and booking.status == "checked_in"
         ]
         if attended:
-            activity.first_visit_at = attended[0].starts_at
+            first_attended_at = attended[0].starts_at
+            existing_first_visit_at = _as_utc(activity.first_visit_at)
+            if existing_first_visit_at is None or (
+                first_attended_at is not None and _as_utc(first_attended_at) is not None and _as_utc(first_attended_at) < existing_first_visit_at
+            ):
+                activity.first_visit_at = first_attended_at
         lifetime_count = len(attended)
-        activity.lifetime_visits_baseline = lifetime_count
+        existing_baseline = activity.lifetime_visits_baseline or 0
+        existing_increment = activity.lifetime_visits_increment or 0
+        existing_total = activity.total_visits or 0
+        total_derived_baseline = max(existing_total - existing_increment, 0)
+        canonical_floor = max(
+            existing_baseline,
+            total_derived_baseline,
+            (activity.visits_last_30d or 0) + (activity.visits_previous_30d or 0),
+        )
+        normalized_baseline = max(lifetime_count, canonical_floor) if settings.momence_preserve_canonical_history else lifetime_count
+        activity.lifetime_visits_baseline = normalized_baseline
         activity.lifetime_visits_baseline_as_of = now
-        activity.total_visits = lifetime_count + (activity.lifetime_visits_increment or 0)
+        activity.total_visits = max(
+            existing_total,
+            normalized_baseline + existing_increment,
+        )
 
         if attended:
-            activity.last_checkin_at = attended[-1].starts_at
+            attended_last_checkin_at = attended[-1].starts_at
+            existing_last_checkin_at = _as_utc(activity.last_checkin_at)
+            if existing_last_checkin_at is None or (
+                attended_last_checkin_at is not None
+                and _as_utc(attended_last_checkin_at) is not None
+                and _as_utc(attended_last_checkin_at) > existing_last_checkin_at
+            ):
+                activity.last_checkin_at = attended_last_checkin_at
 
         future_bookings = [
             booking
@@ -900,7 +934,8 @@ def _recompute_client_activity_from_bookings(db: Session, client: Client, now: d
         activity.next_booking_at = future_bookings[0].starts_at if future_bookings else None
 
     activity.activity_updated_at = now
-    db.add(activity)
+    if db is not None:
+        db.add(activity)
 
 
 def _upsert_member_booking_history_rows(db: Session, client: Client, rows: list[dict]) -> int:

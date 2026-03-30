@@ -4,6 +4,7 @@ import unittest
 from app.db.models import Booking, Client, ClientActivity, ClientMembership
 from app.services.client_context import build_membership_summary
 from app.services.client_intelligence import canonical_client_lifetime_visits
+from app.services.sync.jobs import _recompute_client_activity_from_bookings
 
 
 class ClientLogicTests(unittest.TestCase):
@@ -52,6 +53,39 @@ class ClientLogicTests(unittest.TestCase):
 
         self.assertTrue(summary.active)
         self.assertEqual(summary.name, "12x Month")
+
+    def test_roster_backfill_does_not_reduce_imported_lifetime_baseline(self) -> None:
+        now = datetime.now(timezone.utc)
+        client = Client(momence_member_id="member-3", bookings=[])
+        client.activity = ClientActivity(
+            lifetime_visits_baseline=50,
+            lifetime_visits_increment=1,
+            total_visits=51,
+            visits_last_30d=10,
+            visits_previous_30d=10,
+        )
+        client.bookings = [
+            Booking(
+                momence_booking_id="booking-10",
+                momence_session_id="session-10",
+                client_id=client.id,
+                starts_at=now - timedelta(days=3),
+                status="checked_in",
+            ),
+            Booking(
+                momence_booking_id="booking-11",
+                momence_session_id="session-11",
+                client_id=client.id,
+                starts_at=now + timedelta(hours=2),
+                status="booked",
+            ),
+        ]
+
+        _recompute_client_activity_from_bookings(None, client, now)
+
+        self.assertEqual(client.activity.lifetime_visits_baseline, 50)
+        self.assertEqual(client.activity.total_visits, 51)
+        self.assertEqual(client.activity.last_checkin_at, now - timedelta(days=3))
 
 
 if __name__ == "__main__":
