@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.db.models import Client, ClientActivity, ClientMembership, ClientNote, ClientPreference, ClientProfileData
 from app.services.momence.client import MomenceClient
 from app.services.automation import run_preopen_ops_sync
+from app.api.routes.ui import invalidate_demo_cache
 from app.schemas import (
     BookingHistoryProgressResponse,
     BookingHistoryRunRequest,
@@ -43,12 +44,16 @@ router = APIRouter()
 
 @router.post("/sync/preopen")
 def run_preopen_sync(db: Session = Depends(get_db)) -> dict[str, SyncRunResponse]:
-    return run_preopen_ops_sync(db)
+    result = run_preopen_ops_sync(db)
+    invalidate_demo_cache()
+    return result
 
 
 @router.post("/sync/upcoming-bookings", response_model=SyncRunResponse)
 def run_upcoming_bookings_sync(db: Session = Depends(get_db)) -> SyncRunResponse:
-    return sync_upcoming_bookings(db)
+    result = sync_upcoming_bookings(db)
+    invalidate_demo_cache()
+    return result
 
 
 @router.post("/sync/bookings/day", response_model=SyncRunResponse)

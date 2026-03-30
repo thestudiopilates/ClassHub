@@ -561,6 +561,7 @@ def _build_session_card(
         "id": session_id,
         "title": title or "Session",
         "time": _session_time_label(starts_at),
+        "startsAtUtc": starts_at.isoformat() if starts_at else None,
         "instructor": instructor_name or "TBD",
         "location": location_name or "Studio",
         "summary": [
@@ -686,12 +687,6 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
 
     sessions = []
     for session_view in instructor_view.sessions:
-        # Hide sessions that have already ended (started 60+ min ago).
-        # Data stays in DB for next time the client appears.
-        if session_view.starts_at:
-            session_end = _as_utc(session_view.starts_at)
-            if session_end and session_end + timedelta(minutes=60) < now:
-                continue
         session_bookings = grouped_bookings.get(session_view.session_id, [])
         bookings_by_id = {booking.momence_booking_id: booking for booking in session_bookings}
         bookings_by_member = {
