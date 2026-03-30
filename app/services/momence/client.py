@@ -103,12 +103,20 @@ class MomenceClient:
         if access_token_is_fresh(stored):
             return stored["access_token"]
 
+        refresh_error: Exception | None = None
         if stored and stored.get("refresh_token"):
-            refreshed = await self.refresh_access_token(stored["refresh_token"])
-            if refreshed.get("access_token"):
-                return refreshed["access_token"]
+            try:
+                refreshed = await self.refresh_access_token(stored["refresh_token"])
+                if refreshed.get("access_token"):
+                    return refreshed["access_token"]
+            except Exception as exc:
+                refresh_error = exc
+                if stored.get("access_token"):
+                    return stored["access_token"]
 
         if not all([self.client_id, self.client_secret, self.username, self.password]):
+            if stored and stored.get("access_token"):
+                return stored["access_token"]
             missing = [
                 name
                 for name, value in [
@@ -119,7 +127,10 @@ class MomenceClient:
                 ]
                 if not value
             ]
-            raise RuntimeError(f"Missing Momence credentials: {', '.join(missing)}")
+            message = f"Missing Momence credentials: {', '.join(missing)}"
+            if refresh_error is not None:
+                message = f"{message}. Refresh also failed: {refresh_error}"
+            raise RuntimeError(message)
 
         async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as client:
             response = await client.post(
