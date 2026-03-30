@@ -529,6 +529,22 @@ def _roster_sort_key(client: Client, now: datetime) -> tuple[int, str]:
     return (0 if is_featured else 1, _full_name(client).lower())
 
 
+def _session_time_label(starts_at: datetime | None) -> str:
+    if starts_at is None:
+        return "TBD"
+    now_utc = datetime.now(timezone.utc)
+    starts_utc = _as_utc(starts_at)
+    time_str = _booking_as_local(starts_at).strftime("%-I:%M %p")
+    if starts_utc is None:
+        return time_str
+    ends_utc = starts_utc + timedelta(minutes=60)
+    if starts_utc <= now_utc <= ends_utc:
+        return f"Now · {time_str}"
+    if starts_utc > now_utc:
+        return f"Up next · {time_str}"
+    return f"Earlier · {time_str}"
+
+
 def _build_session_card(
     session_id: str,
     title: str | None,
@@ -544,7 +560,7 @@ def _build_session_card(
     return {
         "id": session_id,
         "title": title or "Session",
-        "time": _booking_as_local(starts_at).strftime("%-I:%M %p") if starts_at else "TBD",
+        "time": _session_time_label(starts_at),
         "instructor": instructor_name or "TBD",
         "location": location_name or "Studio",
         "summary": [
@@ -810,7 +826,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
         elif flags_summary.birthday_this_week:
             celebrations.append(f"{_full_name(client)} · Birthday this week")
         elif flags_summary.welcome_back:
-            celebrations.append(f"{_full_name(client)} · First class back after baby")
+            celebrations.append(f"{_full_name(client)} · First visit back after a gap")
     celebrations = celebrations[:6]
 
     selected_profile_id = frontdesk[0]["id"] if frontdesk else (next(iter(people.keys()), None))

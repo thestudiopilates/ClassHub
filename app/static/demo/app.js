@@ -230,7 +230,7 @@ const fallbackData = {
       title: "Power Flow",
       time: "Now · 8:00 AM",
       instructor: "Autumn",
-      location: "Main Studio",
+      location: "Emory Village",
       summary: [
         { label: "In class", value: "6" },
         { label: "Milestones", value: "2" },
@@ -338,7 +338,7 @@ const fallbackData = {
       title: "Sculpt Reformer",
       time: "Up next · 9:15 AM",
       instructor: "Minji",
-      location: "North Room",
+      location: "Emory Village",
       summary: [
         { label: "Booked", value: "5" },
         { label: "Birthdays", value: "1" },
@@ -526,8 +526,11 @@ function buildLocationSummary() {
 
 function renderSummary() {
   const locationSummary = buildLocationSummary();
+  const hasLiveData = Boolean(currentData.meta?.liveBookings);
+  const allZero = locationSummary.every((item) => item.value === 0);
+  const stats = hasLiveData && allZero ? currentData.summary : locationSummary;
   summaryHeading.textContent = `${locationLabel()} snapshot`;
-  summaryStats.innerHTML = locationSummary
+  summaryStats.innerHTML = stats
     .map(
       (item, index) => `
         <article class="stat-card ${index === 3 && Number(item.value) > 0 ? "is-milestones" : index === 2 ? "is-milestones" : ""}">
@@ -753,7 +756,7 @@ function renderFrontdesk() {
               : ""
           }
           <footer>
-            <div class="service-prompt">${person.profile.chips[0]}</div>
+            <div class="service-prompt">${person.profile.chips?.[0] || "Warm, personal service recommended"}</div>
             <div class="frontdesk-context">${person.profile.subtext}</div>
           </footer>
         </article>
@@ -949,7 +952,7 @@ function renderSessions() {
                     </div>
                   </div>
                   <div class="breakdown-grid">
-                    ${entry.expand.breakdowns
+                    ${(entry.expand.breakdowns || [])
                       .map(
                         (section) => `
                           <article class="breakdown-card">
@@ -988,7 +991,7 @@ function renderSessions() {
                       .join("")}
                   </div>
                   <div class="inline-notes">
-                    ${entry.expand.notes.map((note) => `<span class="chip">${note}</span>`).join("")}
+                    ${(entry.expand.notes || []).map((note) => `<span class="chip">${note}</span>`).join("")}
                     ${person.profile.notes.map((note) => `<article><strong>Team prompt</strong><p>${note}</p></article>`).join("")}
                   </div>
                 </div>
