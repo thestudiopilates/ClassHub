@@ -293,7 +293,7 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
     db.query(ClientNote).filter(ClientNote.client_id == client.id).delete()
     inserted = 0
     for note in notes:
-        note_text = (note.get("notePreview") or "").strip()
+        note_text = (note.get("note") or note.get("notePreview") or "").strip()
         if not note_text:
             continue
         injury_flag = _is_injury_note(note_text)
