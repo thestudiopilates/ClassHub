@@ -51,9 +51,9 @@ def attended_bookings(client: Client, now: datetime | None = None) -> list[Booki
 
 def canonical_client_lifetime_visits(client: Client, now: datetime | None = None) -> int:
     attended = attended_bookings(client, now)
-    if attended:
-        return len(attended)
-    return canonical_lifetime_visits(client.activity)
+    attended_total = len(attended)
+    activity_total = canonical_lifetime_visits(client.activity)
+    return max(attended_total, activity_total)
 
 
 def canonical_visit_windows(client: Client, now: datetime | None = None) -> tuple[int, int]:

@@ -139,9 +139,10 @@ def active_membership_label(client: Client) -> str | None:
 
 def build_membership_summary(client: Client) -> MembershipSummary:
     activity = client.activity
+    active_name = active_membership_label(client)
     return MembershipSummary(
-        active=bool(activity and activity.has_active_membership),
-        name=active_membership_label(client) or (activity.active_membership_name if activity else None),
+        active=bool(active_name or (activity and activity.has_active_membership)),
+        name=active_name or (activity.active_membership_name if activity else None),
     )
 
 
@@ -614,7 +615,7 @@ def build_enriched_client_context(client: Client, now: datetime | None = None) -
         now=current,
         full_name=client.full_name or " ".join(part for part in [client.first_name, client.last_name] if part).strip(),
         membership=build_membership_summary(client),
-        activity=build_activity_summary(client),
+        activity=build_activity_summary(client, current),
         flags=flags,
         profile_data=build_profile_data_summary(client),
         preferences=build_preferences_summary(client),
