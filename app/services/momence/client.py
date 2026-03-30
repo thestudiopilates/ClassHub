@@ -346,11 +346,31 @@ class MomenceClient:
             params={"sortBy": "modifiedAt", "sortOrder": "DESC"},
         )
 
-    async def fetch_member_memberships(self, momence_member_id: str) -> list[dict]:
-        return await self._get_paginated(
-            f"/api/v2/host/members/{momence_member_id}/bought-memberships/active",
-            params={"includeFrozen": "false"},
-        )
+    async def fetch_member_memberships(self, momence_member_id: str) -> list[dict] | dict:
+        """Return active memberships for a member.
+
+        The Momence endpoint may return either:
+        - A paginated envelope  {"payload": [...], ...}  → unwrap and return the list
+        - A structured dict     {"subscriptions": [...], "creditsAndEvents": [...]}  → return as-is
+        - A bare list           [...]  → return as-is
+
+        ``_membership_collections`` in jobs.py handles all three shapes.
+        """
+        async with await self._authorized_client() as client:
+            response = await client.get(
+                f"/api/v2/host/members/{momence_member_id}/bought-memberships/active",
+                params={"includeFrozen": "false"},
+            )
+            response.raise_for_status()
+            body = response.json()
+        if isinstance(body, list):
+            return body
+        if isinstance(body, dict):
+            if "payload" in body:
+                return body.get("payload") or []
+            # Structured dict with subscriptions / creditsAndEvents keys — pass through
+            return body
+        return []
 
     async def fetch_member_session_bookings(self, momence_member_id: str) -> list[dict]:
         page = 0

@@ -819,7 +819,11 @@ def sync_upcoming_bookings(db: Session) -> SyncRunResponse:
             rows = _read_booking_rows()
             records_processed, impacted_member_ids = _upsert_upcoming_booking_rows(db, rows)
         db.commit()
-        if impacted_member_ids and settings.momence_browser_profile_dir.strip():
+        v2_api_ready = bool(
+            (settings.momence_client_id.strip() and settings.momence_client_secret.strip())
+            or (settings.momence_username.strip() and settings.momence_password.strip())
+        )
+        if impacted_member_ids and v2_api_ready:
             try:
                 limited_member_ids = impacted_member_ids[: settings.momence_max_context_refresh_batch]
                 refresh_clients_by_member_ids(db, limited_member_ids)
