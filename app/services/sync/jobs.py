@@ -598,6 +598,9 @@ def _reset_session_bookings(db: Session, session_id: str) -> None:
 def _upsert_upcoming_bookings_from_api(db: Session, booking_rows: list[dict]) -> tuple[int, list[str]]:
     now = datetime.now(timezone.utc)
     window_end = _upcoming_window_end()
+    # Include all classes from start of today (not just from now) so in-progress
+    # classes aren't dropped. Display filtering handles hiding ended sessions.
+    today_start = now.astimezone(LOCAL_TZ).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     impacted_member_ids: list[str] = []
     processed = 0
 
@@ -612,7 +615,7 @@ def _upsert_upcoming_bookings_from_api(db: Session, booking_rows: list[dict]) ->
         starts_at = _parse_iso_datetime(session.get("startsAt"))
         if not member_id or not booking_id or starts_at is None:
             continue
-        if starts_at < now or starts_at > window_end:
+        if starts_at < today_start or starts_at > window_end:
             continue
 
         client = _upsert_client_from_booking_member(db, member, now)
@@ -761,10 +764,11 @@ def _upcoming_window_end() -> datetime:
 
 
 def _read_upcoming_bookings_from_host_api() -> list[dict]:
-    now = datetime.now(timezone.utc)
+    # Fetch from start of today (not now) so in-progress classes are included
+    today_start = datetime.now(LOCAL_TZ).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     window_end = _upcoming_window_end()
     client = MomenceClient()
-    return asyncio.run(client.fetch_upcoming_bookings(now, window_end))
+    return asyncio.run(client.fetch_upcoming_bookings(today_start, window_end))
 
 
 def _read_upcoming_bookings_window_from_host_api(window_start: datetime, window_end: datetime) -> list[dict]:
