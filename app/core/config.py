@@ -7,6 +7,13 @@ class Settings(BaseSettings):
     app_name: str = "Momence Ops API"
     api_prefix: str = "/v1"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/momence_ops"
+    # Individual DB connection params — preferred over database_url when db_host is set.
+    # Use these for Supabase pooler (avoids psycopg3 URL parsing issues with dotted usernames).
+    db_host: str = ""
+    db_port: int = 5432
+    db_user: str = ""
+    db_password: str = ""
+    db_name: str = "postgres"
     momence_base_url: str = "https://api.momence.com"
     momence_client_id: str = ""
     momence_client_secret: str = ""
