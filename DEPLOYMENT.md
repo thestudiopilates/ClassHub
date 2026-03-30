@@ -49,14 +49,14 @@ bash railway/run-ops-sync.sh
 Recommended env:
 
 ```text
-OPS_AUTOMATION_MODE=preopen
+OPS_AUTOMATION_MODE=intraday
 OPS_TARGET_DAY=today
 ```
 
 Recommended schedule:
 
-- one pre-open run before the first classes each day
-- one sync every 2-4 hours during studio hours
+- one pre-open run before the first classes each day using `OPS_AUTOMATION_MODE=preopen`
+- one intraday sync every 2-4 hours during studio hours using `OPS_AUTOMATION_MODE=intraday`
 
 ## Shared Environment Variables
 
@@ -77,6 +77,8 @@ MOMENCE_HISTORY_BOOKING_CHUNK_DAYS=1
 MOMENCE_ENABLE_CHECK_IN_WRITE=false
 OPS_ROSTER_HISTORY_BATCH_SIZE=15
 OPS_ROSTER_HISTORY_PAUSE_SECONDS=0.3
+OPS_ROSTER_HISTORY_PREOPEN_MAX_BATCHES=4
+OPS_ROSTER_HISTORY_INTRADAY_MAX_BATCHES=1
 OPS_AUTO_WARM_ENABLED=true
 OPS_AUTO_WARM_MAX_BATCHES=4
 OPS_AUTO_WARM_DAY_OFFSET=0

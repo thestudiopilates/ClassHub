@@ -103,10 +103,39 @@ def sync_roster_client_history_full(
     )
 
 
+def run_intraday_ops_sync(db: Session, *, day: date | None = None) -> dict[str, SyncRunResponse]:
+    target_day = day or datetime.now().date()
+    bookings = sync_upcoming_bookings(db)
+
+    roster: SyncRunResponse
+    if roster_history_is_fresh_for_day(db, target_day):
+        current = datetime.now(timezone.utc)
+        roster = SyncRunResponse(
+            job_name="sync_roster_client_history_full",
+            status="completed",
+            records_processed=0,
+            started_at=current,
+            finished_at=current,
+            error_text="Skipped roster history because today's backfill is already fresh.",
+        )
+    else:
+        roster = sync_roster_client_history_full(
+            db,
+            day=target_day,
+            max_batches=settings.ops_roster_history_intraday_max_batches,
+        )
+
+    return {"bookings": bookings, "roster_history": roster}
+
+
 def run_preopen_ops_sync(db: Session, *, day: date | None = None) -> dict[str, SyncRunResponse]:
     target_day = day or datetime.now().date()
     bookings = sync_upcoming_bookings(db)
-    roster = sync_roster_client_history_full(db, day=target_day)
+    roster = sync_roster_client_history_full(
+        db,
+        day=target_day,
+        max_batches=settings.ops_roster_history_preopen_max_batches,
+    )
     return {"bookings": bookings, "roster_history": roster}
 
 

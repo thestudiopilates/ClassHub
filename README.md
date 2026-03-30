@@ -73,6 +73,8 @@ Helpful env vars:
 
 - `OPS_ROSTER_HISTORY_BATCH_SIZE=15`
 - `OPS_ROSTER_HISTORY_PAUSE_SECONDS=0.3`
+- `OPS_ROSTER_HISTORY_PREOPEN_MAX_BATCHES=4`
+- `OPS_ROSTER_HISTORY_INTRADAY_MAX_BATCHES=1`
 - `OPS_AUTO_WARM_ENABLED=true`
 - `OPS_AUTO_WARM_MAX_BATCHES=4`
 - `OPS_AUTO_WARM_DAY_OFFSET=0`
@@ -97,12 +99,12 @@ bash railway/run-ops-sync.sh
 
 Recommended cron schedule for the sync service:
 
-- pre-open run each morning before classes begin
-- intraday run every 2-4 hours during studio hours
+- one `preopen` run each morning before classes begin
+- one `intraday` run every 2-4 hours during studio hours
 
 Suggested env on the sync service:
 
-- `OPS_AUTOMATION_MODE=preopen`
+- `OPS_AUTOMATION_MODE=intraday`
 - `OPS_TARGET_DAY=today`
 
 Full setup notes live in [DEPLOYMENT.md](/Users/kellyjackson/Documents/Codex/Customer%20Birthdays%20and%20Milestone%20/DEPLOYMENT.md).

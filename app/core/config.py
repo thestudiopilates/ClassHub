@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     momence_enable_check_in_write: bool = False
     ops_roster_history_batch_size: int = 15
     ops_roster_history_pause_seconds: float = 0.3
+    ops_roster_history_preopen_max_batches: int = 4
+    ops_roster_history_intraday_max_batches: int = 1
     ops_auto_warm_enabled: bool = False
     ops_auto_warm_max_batches: int = 4
     ops_auto_warm_day_offset: int = 0

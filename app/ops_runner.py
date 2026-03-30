@@ -4,7 +4,7 @@ import argparse
 from datetime import date, datetime
 
 from app.db.session import SessionLocal
-from app.services.automation import run_preopen_ops_sync, sync_roster_client_history_full
+from app.services.automation import run_intraday_ops_sync, run_preopen_ops_sync, sync_roster_client_history_full
 
 
 def _parse_day(raw: str | None) -> date | None:
@@ -15,7 +15,7 @@ def _parse_day(raw: str | None) -> date | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run scheduled Momence ops sync jobs.")
-    parser.add_argument("--mode", choices=["preopen", "roster-history"], default="preopen")
+    parser.add_argument("--mode", choices=["preopen", "intraday", "roster-history"], default="preopen")
     parser.add_argument("--day", default="today")
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--max-batches", type=int, default=None)
@@ -26,6 +26,15 @@ def main() -> int:
     try:
         if args.mode == "preopen":
             results = run_preopen_ops_sync(db, day=target_day)
+            for name, result in results.items():
+                print(f"{name}: status={result.status} records={result.records_processed}")
+                if result.status != "completed":
+                    print(result.error_text or "")
+                    return 1
+            return 0
+
+        if args.mode == "intraday":
+            results = run_intraday_ops_sync(db, day=target_day)
             for name, result in results.items():
                 print(f"{name}: status={result.status} records={result.records_processed}")
                 if result.status != "completed":
