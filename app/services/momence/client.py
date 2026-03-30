@@ -361,21 +361,33 @@ class MomenceClient:
 
         ``_membership_collections`` in jobs.py handles all three shapes.
         """
+        all_items: list[dict] = []
+        page = 0
         async with await self._authorized_client() as client:
-            response = await client.get(
-                f"/api/v2/host/members/{momence_member_id}/bought-memberships/active",
-                params={"includeFrozen": "false"},
-            )
-            if response.status_code >= 400:
-                return []
-            body = response.json()
-        if isinstance(body, list):
-            return body
-        if isinstance(body, dict):
-            if "payload" in body:
-                return body.get("payload") or []
-            # Structured dict with subscriptions / creditsAndEvents keys — pass through
-            return body
+            while True:
+                response = await client.get(
+                    f"/api/v2/host/members/{momence_member_id}/bought-memberships/active",
+                    params={"includeFrozen": "false", "page": page, "pageSize": 100},
+                )
+                if response.status_code >= 400:
+                    return all_items
+                body = response.json()
+                # Paginated envelope
+                if isinstance(body, dict) and "payload" in body:
+                    items = body.get("payload") or []
+                    all_items.extend(items)
+                    if len(items) < 100:
+                        break
+                    page += 1
+                    continue
+                # Structured dict (subscriptions/creditsAndEvents) — return as-is
+                if isinstance(body, dict):
+                    return body
+                # Bare list
+                if isinstance(body, list):
+                    return body
+                break
+        return all_items
         return []
 
     async def fetch_member_session_bookings(self, momence_member_id: str) -> list[dict]:
