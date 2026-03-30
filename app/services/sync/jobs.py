@@ -550,6 +550,10 @@ def _reset_booking_window(db: Session, window_start: datetime, window_end: datet
     )
 
 
+def _reset_session_bookings(db: Session, session_id: str) -> None:
+    db.query(Booking).filter(Booking.momence_session_id == session_id).delete(synchronize_session=False)
+
+
 def _upsert_upcoming_bookings_from_api(db: Session, booking_rows: list[dict]) -> tuple[int, list[str]]:
     now = datetime.now(timezone.utc)
     window_end = now + timedelta(days=settings.momence_upcoming_booking_days)
@@ -574,6 +578,57 @@ def _upsert_upcoming_bookings_from_api(db: Session, booking_rows: list[dict]) ->
         booking = Booking(
             momence_booking_id=str(booking_id),
             momence_session_id=str(session.get("id") or ""),
+            client_id=client.id,
+            class_name=session.get("name"),
+            location_name=_session_location_name(session),
+            instructor_name=_session_instructor_name(session),
+            starts_at=starts_at,
+            ends_at=_parse_iso_datetime(session.get("endsAt")),
+            status=_booking_status_from_api(booking_payload),
+            is_waitlist=False,
+            synced_at=now,
+        )
+        db.add(booking)
+
+        activity = client.activity
+        if activity is None:
+            activity = ClientActivity(client_id=client.id)
+        current_next_booking_at = _as_utc(activity.next_booking_at)
+        if current_next_booking_at is None or starts_at < current_next_booking_at:
+            activity.next_booking_at = starts_at
+        current_last_booking_at = _as_utc(activity.last_booking_at)
+        if current_last_booking_at is None or starts_at > current_last_booking_at:
+            activity.last_booking_at = starts_at
+        activity.activity_updated_at = now
+        db.add(activity)
+
+        impacted_member_ids.append(client.momence_member_id)
+        processed += 1
+
+    return processed, list(dict.fromkeys(impacted_member_ids))
+
+
+def _replace_session_bookings_from_api(db: Session, session_id: str, booking_rows: list[dict]) -> tuple[int, list[str]]:
+    now = datetime.now(timezone.utc)
+    impacted_member_ids: list[str] = []
+    processed = 0
+
+    _reset_session_bookings(db, session_id)
+
+    for row in booking_rows:
+        session = row.get("session") or {}
+        booking_payload = row.get("booking") or {}
+        member = booking_payload.get("member") or {}
+        member_id = member.get("id")
+        booking_id = booking_payload.get("id")
+        starts_at = _parse_iso_datetime(session.get("startsAt"))
+        if not member_id or not booking_id or starts_at is None:
+            continue
+
+        client = _upsert_client_from_booking_member(db, member, now)
+        booking = Booking(
+            momence_booking_id=str(booking_id),
+            momence_session_id=str(session.get("id") or session_id),
             client_id=client.id,
             class_name=session.get("name"),
             location_name=_session_location_name(session),
@@ -673,6 +728,11 @@ def _read_upcoming_bookings_window_from_host_api(window_start: datetime, window_
 def _read_booking_history_window_from_host_api(window_start: datetime, window_end: datetime) -> list[dict]:
     client = MomenceClient()
     return asyncio.run(client.fetch_session_bookings_between(window_start, window_end))
+
+
+def _read_session_bookings_for_day_from_host_api(session_id: str, day: date) -> list[dict]:
+    client = MomenceClient()
+    return asyncio.run(client.fetch_session_bookings_for_day(session_id, day))
 
 
 def _read_member_booking_history_from_host_api(momence_member_id: str) -> list[dict]:
@@ -790,6 +850,32 @@ def sync_bookings_for_day(db: Session, day: date) -> SyncRunResponse:
         api_rows = _read_upcoming_bookings_window_from_host_api(window_start, window_end)
         records_processed, _ = _upsert_upcoming_bookings_from_api(db, api_rows)
         db.commit()
+        record_sync_state(db, "bookings", status="completed", records_processed=records_processed)
+        return _finish_run(db, run, "completed", records_processed)
+    except Exception as exc:
+        db.rollback()
+        record_sync_state(db, "bookings", status="failed", records_processed=0, error_text=str(exc))
+        return _finish_run(db, run, "failed", 0, str(exc))
+
+
+def sync_session_bookings_for_day(db: Session, session_id: str, day: date) -> SyncRunResponse:
+    run = _start_run(db, "sync_session_bookings_for_day")
+    try:
+        api_rows = _read_session_bookings_for_day_from_host_api(session_id, day)
+        records_processed, impacted_member_ids = _replace_session_bookings_from_api(db, session_id, api_rows)
+        db.commit()
+        if impacted_member_ids:
+            try:
+                refresh_clients_by_member_ids(db, impacted_member_ids[: settings.momence_max_context_refresh_batch])
+            except Exception as exc:
+                record_sync_state(
+                    db,
+                    "memberships_notes",
+                    status="failed",
+                    records_processed=0,
+                    error_text=f"Optional enrichment skipped: {exc}",
+                )
+                db.commit()
         record_sync_state(db, "bookings", status="completed", records_processed=records_processed)
         return _finish_run(db, run, "completed", records_processed)
     except Exception as exc:

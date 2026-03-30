@@ -26,6 +26,7 @@ from app.services.sync.jobs import (
     refresh_clients_by_member_ids,
     refresh_client_by_member_id,
     sync_bookings_for_day,
+    sync_session_bookings_for_day,
     sync_active_customers_from_browser,
     sync_client_behavior_from_reports,
     sync_birthdays_from_browser,
@@ -53,6 +54,13 @@ def run_upcoming_bookings_sync(db: Session = Depends(get_db)) -> SyncRunResponse
 @router.post("/sync/bookings/day", response_model=SyncRunResponse)
 def run_bookings_for_day_sync(day: date | None = Query(default=None), db: Session = Depends(get_db)) -> SyncRunResponse:
     return sync_bookings_for_day(db, day or date.today())
+
+
+@router.post("/sync/bookings/session/{session_id}", response_model=SyncRunResponse)
+def run_bookings_for_session_sync(
+    session_id: str, day: date | None = Query(default=None), db: Session = Depends(get_db)
+) -> SyncRunResponse:
+    return sync_session_bookings_for_day(db, session_id, day or date.today())
 
 
 @router.post("/sync/booking-history", response_model=SyncRunResponse)

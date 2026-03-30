@@ -293,6 +293,23 @@ class MomenceClient:
                 page += 1
         return rows
 
+    async def fetch_session_bookings_for_day(self, session_id: str, day: date) -> list[dict]:
+        window_start = day
+        window_end = day + timedelta(days=1)
+        sessions: list[dict] = []
+        for params in self._session_window_param_attempts(window_start, window_end):
+            candidates = await self._get_paginated("/api/v2/host/sessions", params=params)
+            sessions = [session for session in candidates if str(session.get("id")) == str(session_id)]
+            if sessions:
+                break
+
+        if not sessions:
+            raise RuntimeError(f"Momence session {session_id} was not found for {day.isoformat()}")
+
+        session = sessions[0]
+        bookings = await self.fetch_session_bookings(session_id)
+        return [{"session": session, "booking": booking} for booking in bookings]
+
     async def fetch_auth_profile(self) -> dict:
         async with await self._authorized_client() as client:
             response = await client.get("/api/v2/auth/profile")
