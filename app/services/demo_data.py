@@ -603,57 +603,76 @@ def _client_load_options(now: datetime) -> list:
 
 
 def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[str, Any]:
-    """Tier 1: Build client profile data. No bookings loaded — fast.
+    """Tier 1: Build client profile data for today's roster. Fast.
 
-    Returns a dict with 'people' and 'celebrations' keys.
-    This is cached all day until a sync invalidates it.
+    Only loads clients who have bookings today, plus a handful of
+    celebration-worthy clients. No booking history loaded.
     """
     now = datetime.now(timezone.utc)
     current_day = _resolve_demo_day(db, day)
+    start_dt, end_dt = _local_day_bounds(current_day)
 
-    # Load active clients with profile data but NO bookings
-    active_stmt = (
-        select(Client)
-        .join(ClientFlag, ClientFlag.client_id == Client.id)
-        .outerjoin(ClientActivity, ClientActivity.client_id == Client.id)
-        .where(ClientFlag.is_active_180d.is_(True))
-        .options(
-            selectinload(Client.activity),
-            selectinload(Client.notes),
-            selectinload(Client.milestones),
-            selectinload(Client.profile_data),
-            selectinload(Client.preferences),
-            selectinload(Client.memberships),
-            selectinload(Client.flags),
-        )
-        .order_by(
-            desc(ClientFlag.birthday_this_week),
-            desc(ClientFlag.welcome_back_flag),
-            desc(ClientFlag.new_client_flag),
-            desc(
-                case(
-                    (ClientFlag.churn_risk == "high", 3),
-                    (ClientFlag.churn_risk == "medium", 2),
-                    (ClientFlag.churn_risk == "low", 1),
-                    else_=0,
-                )
-            ),
-            desc(func.coalesce(ClientActivity.total_visits, 0)),
-        )
+    # Step 1: Find which client IDs are booked today (just IDs — tiny query)
+    today_client_ids = set(
+        db.scalars(
+            select(Booking.client_id)
+            .where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
+            .distinct()
+        ).all()
     )
-    active_clients = db.scalars(active_stmt).all()
 
-    # Set bookings to empty for profile building — prevents lazy-loading
-    # thousands of booking rows. Lifetime counts come from activity.total_visits.
+    # Step 2: Load full profiles ONLY for today's clients (typically 30-60)
+    profile_load_opts = [
+        selectinload(Client.activity),
+        selectinload(Client.notes),
+        selectinload(Client.milestones),
+        selectinload(Client.profile_data),
+        selectinload(Client.preferences),
+        selectinload(Client.memberships),
+        selectinload(Client.flags),
+    ]
+
+    if today_client_ids:
+        clients_stmt = (
+            select(Client)
+            .where(Client.id.in_(today_client_ids))
+            .options(*profile_load_opts)
+        )
+        roster_clients = db.scalars(clients_stmt).all()
+    else:
+        roster_clients = []
+
+    # Set bookings to empty — prevents lazy-loading historical bookings.
+    # Lifetime counts come from activity.total_visits (pre-computed).
     from sqlalchemy.orm.attributes import set_committed_value
-    for client in active_clients:
+    for client in roster_clients:
         set_committed_value(client, "bookings", [])
 
     # Build people dict keyed by slug
-    people = {_slug_client(client): _client_to_demo_person(client) for client in active_clients}
+    people = {_slug_client(client): _client_to_demo_person(client) for client in roster_clients}
 
-    # Build celebrations
-    celebration_clients = active_clients[:8]
+    # Step 3: Build celebrations from flagged clients (small query)
+    celebration_stmt = (
+        select(Client)
+        .join(ClientFlag, ClientFlag.client_id == Client.id)
+        .where(
+            ClientFlag.is_active_180d.is_(True),
+            or_(
+                ClientFlag.birthday_this_week.is_(True),
+                ClientFlag.welcome_back_flag.is_(True),
+            ),
+        )
+        .options(
+            selectinload(Client.activity),
+            selectinload(Client.milestones),
+            selectinload(Client.flags),
+        )
+        .limit(8)
+    )
+    celebration_clients = db.scalars(celebration_stmt).all()
+    for client in celebration_clients:
+        set_committed_value(client, "bookings", [])
+
     celebrations = []
     for client in celebration_clients:
         flags_summary = build_flag_summary(client, now)
@@ -667,18 +686,29 @@ def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[st
             celebrations.append(f"{_full_name(client)} · First visit back after a gap")
     celebrations = celebrations[:6]
 
-    # Build a lookup by member_id for the live roster to use
+    # Also add celebration clients to people dict if not already there
+    for client in celebration_clients:
+        slug = _slug_client(client)
+        if slug not in people:
+            # Need full profile data for display
+            if not client.profile_data:
+                continue
+            people[slug] = _client_to_demo_person(client)
+
     client_by_member_id = {
         client.momence_member_id: client
-        for client in active_clients
+        for client in roster_clients
         if client.momence_member_id
     }
+    for client in celebration_clients:
+        if client.momence_member_id:
+            client_by_member_id.setdefault(client.momence_member_id, client)
 
     return {
         "people": people,
         "celebrations": celebrations,
         "_client_by_member_id": client_by_member_id,
-        "_client_by_id": {client.id: client for client in active_clients},
+        "_client_by_id": {client.id: client for client in roster_clients},
         "_current_day": current_day,
     }
 
