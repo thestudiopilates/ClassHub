@@ -613,10 +613,15 @@ def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[st
     start_dt, end_dt = _local_day_bounds(current_day)
 
     # Step 1: Find which client IDs are booked today (just IDs — tiny query)
+    # Exclude cancelled bookings — they won't appear on the roster
     today_client_ids = set(
         db.scalars(
             select(Booking.client_id)
-            .where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
+            .where(
+                Booking.starts_at >= start_dt,
+                Booking.starts_at < end_dt,
+                Booking.status != "cancelled",
+            )
             .distinct()
         ).all()
     )

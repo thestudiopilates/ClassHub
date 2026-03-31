@@ -123,4 +123,23 @@ def demo_data(day: Optional[date] = None, db: Session = Depends(get_db)) -> dict
     filtered_sessions = _filter_sessions_by_time(cached.get("sessions", []), now)
     live_sessions = _apply_live_time_labels(filtered_sessions)
 
-    return {**cached, "sessions": live_sessions}
+    # Only send profiles for clients visible on screen (roster + frontdesk)
+    needed_ids: set[str] = set()
+    for session in live_sessions:
+        for entry in session.get("roster", []):
+            if pid := entry.get("personId"):
+                needed_ids.add(pid)
+    for item in cached.get("frontdesk", []):
+        if pid := item.get("id"):
+            needed_ids.add(pid)
+    visible_people = {pid: cached["people"][pid] for pid in needed_ids if pid in cached["people"]}
+
+    return {
+        "meta": cached["meta"],
+        "summary": cached["summary"],
+        "freshness": cached["freshness"],
+        "celebrations": cached["celebrations"],
+        "people": visible_people,
+        "frontdesk": cached["frontdesk"],
+        "sessions": live_sessions,
+    }
