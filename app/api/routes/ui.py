@@ -20,12 +20,11 @@ router = APIRouter()
 
 STATIC_ROOT = Path(__file__).resolve().parents[2] / "static" / "demo"
 
-# ── Two-tier cache ────────────────────────────────────────────────────────
-# Tier 1: Client profiles — built once per day or after a sync.
-#   Contains the `people` dict and `celebrations`. No bookings needed.
-# Tier 2: Live roster — rebuilt on every request from today's bookings.
-#   This is a tiny query (~50 rows) cross-referenced against Tier 1.
-_profile_cache: dict[str, Any] = {"profiles": None, "day": None, "built_at": 0.0}
+# ── Full dashboard cache ──────────────────────────────────────────────────
+# The entire dashboard payload is built ONCE and cached in memory.
+# On each request, only the cheap time-filter + labels are re-applied.
+# Invalidated by: sync completion, day rollover.
+_dashboard: dict[str, Any] = {"payload": None, "day": None, "built_at": 0.0}
 
 # Maximum number of sessions to show: current in-progress + next upcoming
 _MAX_VISIBLE_SESSIONS = 3
@@ -35,8 +34,8 @@ _SESSION_VISIBLE_MINUTES = 60
 
 def invalidate_demo_cache() -> None:
     """Call after a sync completes to force a fresh build on next request."""
-    _profile_cache["profiles"] = None
-    _profile_cache["day"] = None
+    _dashboard["payload"] = None
+    _dashboard["day"] = None
 
 
 def _filter_sessions_by_time(sessions: list[dict], now: datetime) -> list[dict]:
@@ -84,6 +83,22 @@ def _apply_live_time_labels(sessions: list[dict]) -> list[dict]:
     return result
 
 
+def _build_full_dashboard(db: Session, day: Optional[date]) -> dict[str, Any]:
+    """Build the complete dashboard payload. Called once, then cached."""
+    profiles = build_client_profiles_cache(db, day)
+    today = day or date.today()
+    live = build_live_roster(db, today, profiles)
+    return {
+        "meta": live["meta"],
+        "summary": live["summary"],
+        "freshness": live["freshness"],
+        "celebrations": profiles["celebrations"],
+        "people": profiles["people"],
+        "frontdesk": live["frontdesk"],
+        "sessions": live["sessions"],
+    }
+
+
 @router.get("/demo")
 def demo_ui() -> FileResponse:
     return FileResponse(STATIC_ROOT / "index.html")
@@ -96,28 +111,16 @@ def demo_data(day: Optional[date] = None, db: Session = Depends(get_db)) -> dict
     today = day or date.today()
     now = datetime.now(timezone.utc)
 
-    # Tier 1: Build client profiles once (no bookings needed)
-    if _profile_cache["profiles"] is None or _profile_cache["day"] != today:
-        profiles = build_client_profiles_cache(db, day)
-        _profile_cache["profiles"] = profiles
-        _profile_cache["day"] = today
-        _profile_cache["built_at"] = now.timestamp()
+    # Build full dashboard once, cache until sync invalidates or day rolls
+    if _dashboard["payload"] is None or _dashboard["day"] != today:
+        _dashboard["payload"] = _build_full_dashboard(db, day)
+        _dashboard["day"] = today
+        _dashboard["built_at"] = now.timestamp()
 
-    cached_profiles = _profile_cache["profiles"]
+    cached = _dashboard["payload"]
 
-    # Tier 2: Build live roster from today's bookings (fast — ~50 rows)
-    live_data = build_live_roster(db, today, cached_profiles)
-
-    # Merge: cached profiles + live roster
-    filtered_sessions = _filter_sessions_by_time(live_data["sessions"], now)
+    # Only serve-time ops: filter sessions by time, refresh labels
+    filtered_sessions = _filter_sessions_by_time(cached.get("sessions", []), now)
     live_sessions = _apply_live_time_labels(filtered_sessions)
 
-    return {
-        "meta": live_data["meta"],
-        "summary": live_data["summary"],
-        "freshness": live_data["freshness"],
-        "celebrations": cached_profiles["celebrations"],
-        "people": cached_profiles["people"],
-        "frontdesk": live_data["frontdesk"],
-        "sessions": live_sessions,
-    }
+    return {**cached, "sessions": live_sessions}
