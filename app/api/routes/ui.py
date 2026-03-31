@@ -26,10 +26,8 @@ STATIC_ROOT = Path(__file__).resolve().parents[2] / "static" / "demo"
 # Invalidated by: sync completion, day rollover.
 _dashboard: dict[str, Any] = {"payload": None, "day": None, "built_at": 0.0}
 
-# Maximum number of sessions to show: current in-progress + next upcoming
-_MAX_VISIBLE_SESSIONS = 3
-# How long after a class starts before it's hidden (minutes)
-_SESSION_VISIBLE_MINUTES = 60
+# How long a class lasts (minutes) — used to determine when a class has ended
+_CLASS_DURATION_MINUTES = 55
 
 
 def invalidate_demo_cache() -> None:
@@ -39,7 +37,7 @@ def invalidate_demo_cache() -> None:
 
 
 def _filter_sessions_by_time(sessions: list[dict], now: datetime) -> list[dict]:
-    """Cheap time filter: drop ended sessions, keep Now + next upcoming."""
+    """Show current + all remaining sessions for the day. Hide ended classes."""
     visible = []
     for session in sessions:
         starts_utc_str = session.get("startsAtUtc")
@@ -53,16 +51,15 @@ def _filter_sessions_by_time(sessions: list[dict], now: datetime) -> list[dict]:
         except (ValueError, TypeError):
             visible.append(session)
             continue
-        session_end = starts_utc + timedelta(minutes=_SESSION_VISIBLE_MINUTES)
+        # A class is "ended" when its duration has passed
+        session_end = starts_utc + timedelta(minutes=_CLASS_DURATION_MINUTES)
         if session_end < now:
             continue  # ended — hide
         visible.append(session)
 
     # Sort: in-progress first, then by start time
     visible.sort(key=lambda s: s.get("startsAtUtc") or "")
-
-    # Limit to current + next few
-    return visible[:_MAX_VISIBLE_SESSIONS]
+    return visible
 
 
 def _apply_live_time_labels(sessions: list[dict]) -> list[dict]:
