@@ -1194,11 +1194,11 @@ def refresh_client_by_member_id(db: Session, momence_member_id: str) -> SyncRunR
     return refresh_clients_by_member_ids(db, [momence_member_id])
 
 
-def enrich_all_unenriched_clients(db: Session, *, batch_size: int = 50, force_all: bool = False) -> SyncRunResponse:
+def enrich_all_unenriched_clients(db: Session, *, batch_size: int = 50, force_all: bool = False, offset: int = 0) -> SyncRunResponse:
     """Enrich profile data for clients. Re-fetches visits from Momence API.
 
     When force_all=True, re-enriches ALL clients (not just unenriched ones).
-    Processes in batches. Designed to be called repeatedly until all are done.
+    Processes in batches. Use offset to paginate through all clients.
     """
     run = _start_run(db, "enrich_all_unenriched")
     try:
@@ -1214,7 +1214,7 @@ def enrich_all_unenriched_clients(db: Session, *, batch_size: int = 50, force_al
                     (ClientProfileData.client_id == None) | (ClientProfileData.fun_fact == None)  # noqa: E711
                 )
             )
-        all_clients = query.limit(batch_size).all()
+        all_clients = query.order_by(Client.id).offset(offset).limit(batch_size).all()
 
         if not all_clients:
             return _finish_run(db, run, "completed", 0)

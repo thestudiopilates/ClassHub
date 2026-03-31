@@ -608,12 +608,18 @@ def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[st
     Only loads clients who have bookings today, plus a handful of
     celebration-worthy clients. No booking history loaded.
     """
+    import time as _time
+    import logging as _logging
+    _log = _logging.getLogger("demo_data.perf")
+    _t0 = _time.monotonic()
     now = datetime.now(timezone.utc)
     current_day = _resolve_demo_day(db, day)
+    _log.warning("resolve_demo_day: %.3fs", _time.monotonic() - _t0)
     start_dt, end_dt = _local_day_bounds(current_day)
 
     # Step 1: Find which client IDs are booked today (just IDs — tiny query)
     # Exclude cancelled bookings — they won't appear on the roster
+    _t1 = _time.monotonic()
     today_client_ids = set(
         db.scalars(
             select(Booking.client_id)
@@ -625,6 +631,7 @@ def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[st
             .distinct()
         ).all()
     )
+    _log.warning("step1_booking_ids (%d): %.3fs", len(today_client_ids), _time.monotonic() - _t1)
 
     # Step 2: Load full profiles ONLY for today's clients (typically 30-60)
     profile_load_opts = [
@@ -637,6 +644,7 @@ def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[st
         selectinload(Client.flags),
     ]
 
+    _t2 = _time.monotonic()
     if today_client_ids:
         clients_stmt = (
             select(Client)
@@ -646,6 +654,7 @@ def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[st
         roster_clients = db.scalars(clients_stmt).all()
     else:
         roster_clients = []
+    _log.warning("step2_load_clients (%d): %.3fs", len(roster_clients), _time.monotonic() - _t2)
 
     # Set bookings to empty — prevents lazy-loading historical bookings.
     # Lifetime counts come from activity.total_visits (pre-computed).
@@ -654,7 +663,9 @@ def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[st
         set_committed_value(client, "bookings", [])
 
     # Build people dict keyed by slug
+    _t3 = _time.monotonic()
     people = {_slug_client(client): _client_to_demo_person(client) for client in roster_clients}
+    _log.warning("step2b_build_people (%d): %.3fs", len(people), _time.monotonic() - _t3)
 
     # Step 3: Build celebrations from flagged clients (small query)
     celebration_stmt = (
@@ -726,6 +737,10 @@ def build_live_roster(
     Cross-references bookings against the cached client profiles.
     If a client is on the roster but not in the cache, loads just that one.
     """
+    import time as _time
+    import logging as _logging
+    _log = _logging.getLogger("demo_data.perf")
+    _t0 = _time.monotonic()
     now = datetime.now(timezone.utc)
     current_day = profiles_cache.get("_current_day", day)
     client_by_id: dict = dict(profiles_cache.get("_client_by_id", {}))

@@ -132,9 +132,10 @@ def run_session_refresh(
 def run_enrich_all_profiles(
     batch_size: int = Query(default=50, le=200),
     force: bool = Query(default=False),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> SyncRunResponse:
-    result = enrich_all_unenriched_clients(db, batch_size=batch_size, force_all=force)
+    result = enrich_all_unenriched_clients(db, batch_size=batch_size, force_all=force, offset=offset)
     invalidate_demo_cache()
     return result
 
