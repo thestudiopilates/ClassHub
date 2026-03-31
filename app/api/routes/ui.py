@@ -8,7 +8,11 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.demo_data import build_demo_payload, _session_time_label
+from app.services.demo_data import (
+    build_client_profiles_cache,
+    build_live_roster,
+    _session_time_label,
+)
 from app.services.automation import trigger_auto_warm_if_needed
 
 
@@ -16,12 +20,12 @@ router = APIRouter()
 
 STATIC_ROOT = Path(__file__).resolve().parents[2] / "static" / "demo"
 
-# ── Cache ────────────────────────────────────────────────────────────────
-# The full payload (all clients, all sessions for the day) is built ONCE
-# and cached until a sync invalidates it or the day rolls over.
-# On each request, only a cheap time-filter is applied to show the current
-# class + next 2 upcoming classes. No DB queries on refresh.
-_demo_cache: dict[str, Any] = {"payload": None, "day": None, "built_at": 0.0}
+# ── Two-tier cache ────────────────────────────────────────────────────────
+# Tier 1: Client profiles — built once per day or after a sync.
+#   Contains the `people` dict and `celebrations`. No bookings needed.
+# Tier 2: Live roster — rebuilt on every request from today's bookings.
+#   This is a tiny query (~50 rows) cross-referenced against Tier 1.
+_profile_cache: dict[str, Any] = {"profiles": None, "day": None, "built_at": 0.0}
 
 # Maximum number of sessions to show: current in-progress + next upcoming
 _MAX_VISIBLE_SESSIONS = 3
@@ -31,8 +35,8 @@ _SESSION_VISIBLE_MINUTES = 60
 
 def invalidate_demo_cache() -> None:
     """Call after a sync completes to force a fresh build on next request."""
-    _demo_cache["payload"] = None
-    _demo_cache["day"] = None
+    _profile_cache["profiles"] = None
+    _profile_cache["day"] = None
 
 
 def _filter_sessions_by_time(sessions: list[dict], now: datetime) -> list[dict]:
@@ -92,18 +96,28 @@ def demo_data(day: Optional[date] = None, db: Session = Depends(get_db)) -> dict
     today = day or date.today()
     now = datetime.now(timezone.utc)
 
-    # Build the full payload once, cache it
-    if _demo_cache["payload"] is None or _demo_cache["day"] != today:
-        payload = build_demo_payload(db, day)
-        _demo_cache["payload"] = payload
-        _demo_cache["day"] = today
-        _demo_cache["built_at"] = now.timestamp()
+    # Tier 1: Build client profiles once (no bookings needed)
+    if _profile_cache["profiles"] is None or _profile_cache["day"] != today:
+        profiles = build_client_profiles_cache(db, day)
+        _profile_cache["profiles"] = profiles
+        _profile_cache["day"] = today
+        _profile_cache["built_at"] = now.timestamp()
 
-    cached = _demo_cache["payload"]
+    cached_profiles = _profile_cache["profiles"]
 
-    # Cheap serve-time operations: filter sessions by time, refresh labels
-    filtered_sessions = _filter_sessions_by_time(cached.get("sessions", []), now)
+    # Tier 2: Build live roster from today's bookings (fast — ~50 rows)
+    live_data = build_live_roster(db, today, cached_profiles)
+
+    # Merge: cached profiles + live roster
+    filtered_sessions = _filter_sessions_by_time(live_data["sessions"], now)
     live_sessions = _apply_live_time_labels(filtered_sessions)
 
-    # Return cached payload with live-filtered sessions
-    return {**cached, "sessions": live_sessions}
+    return {
+        "meta": live_data["meta"],
+        "summary": live_data["summary"],
+        "freshness": live_data["freshness"],
+        "celebrations": cached_profiles["celebrations"],
+        "people": cached_profiles["people"],
+        "frontdesk": live_data["frontdesk"],
+        "sessions": live_sessions,
+    }

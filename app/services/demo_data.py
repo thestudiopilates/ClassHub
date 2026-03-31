@@ -602,6 +602,263 @@ def _client_load_options(now: datetime) -> list:
     ]
 
 
+def build_client_profiles_cache(db: Session, day: date | None = None) -> dict[str, Any]:
+    """Tier 1: Build client profile data. No bookings loaded — fast.
+
+    Returns a dict with 'people' and 'celebrations' keys.
+    This is cached all day until a sync invalidates it.
+    """
+    now = datetime.now(timezone.utc)
+    current_day = _resolve_demo_day(db, day)
+
+    # Load active clients with profile data but NO bookings
+    active_stmt = (
+        select(Client)
+        .join(ClientFlag, ClientFlag.client_id == Client.id)
+        .outerjoin(ClientActivity, ClientActivity.client_id == Client.id)
+        .where(ClientFlag.is_active_180d.is_(True))
+        .options(
+            selectinload(Client.activity),
+            selectinload(Client.notes),
+            selectinload(Client.milestones),
+            selectinload(Client.profile_data),
+            selectinload(Client.preferences),
+            selectinload(Client.memberships),
+            selectinload(Client.flags),
+        )
+        .order_by(
+            desc(ClientFlag.birthday_this_week),
+            desc(ClientFlag.welcome_back_flag),
+            desc(ClientFlag.new_client_flag),
+            desc(
+                case(
+                    (ClientFlag.churn_risk == "high", 3),
+                    (ClientFlag.churn_risk == "medium", 2),
+                    (ClientFlag.churn_risk == "low", 1),
+                    else_=0,
+                )
+            ),
+            desc(func.coalesce(ClientActivity.total_visits, 0)),
+        )
+    )
+    active_clients = db.scalars(active_stmt).all()
+
+    # Set bookings to empty for profile building — prevents lazy-loading
+    # thousands of booking rows. Lifetime counts come from activity.total_visits.
+    from sqlalchemy.orm.attributes import set_committed_value
+    for client in active_clients:
+        set_committed_value(client, "bookings", [])
+
+    # Build people dict keyed by slug
+    people = {_slug_client(client): _client_to_demo_person(client) for client in active_clients}
+
+    # Build celebrations
+    celebration_clients = active_clients[:8]
+    celebrations = []
+    for client in celebration_clients:
+        flags_summary = build_flag_summary(client, now)
+        milestones = build_milestones(client, now)
+        display_milestone = next((item for item in milestones if item.type != "visit_count"), None)
+        if display_milestone:
+            celebrations.append(f"{_full_name(client)} · {display_milestone.value or display_milestone.type}")
+        elif flags_summary.birthday_this_week:
+            celebrations.append(f"{_full_name(client)} · Birthday this week")
+        elif flags_summary.welcome_back:
+            celebrations.append(f"{_full_name(client)} · First visit back after a gap")
+    celebrations = celebrations[:6]
+
+    # Build a lookup by member_id for the live roster to use
+    client_by_member_id = {
+        client.momence_member_id: client
+        for client in active_clients
+        if client.momence_member_id
+    }
+
+    return {
+        "people": people,
+        "celebrations": celebrations,
+        "_client_by_member_id": client_by_member_id,
+        "_client_by_id": {client.id: client for client in active_clients},
+        "_current_day": current_day,
+    }
+
+
+def build_live_roster(
+    db: Session, day: date, profiles_cache: dict[str, Any]
+) -> dict[str, Any]:
+    """Tier 2: Build live roster from today's bookings. Fast — just booking rows.
+
+    Cross-references bookings against the cached client profiles.
+    If a client is on the roster but not in the cache, loads just that one.
+    """
+    now = datetime.now(timezone.utc)
+    current_day = profiles_cache.get("_current_day", day)
+    client_by_id: dict = dict(profiles_cache.get("_client_by_id", {}))
+    client_by_member_id: dict = dict(profiles_cache.get("_client_by_member_id", {}))
+    people: dict = profiles_cache.get("people", {})
+    current_day_label = datetime.combine(current_day, datetime.min.time(), tzinfo=LOCAL_TZ).strftime("%A, %B %-d")
+
+    # Query today's bookings — this is the only DB query per request
+    start_dt, end_dt = _local_day_bounds(current_day)
+    bookings = db.scalars(
+        select(Booking)
+        .where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
+        .order_by(Booking.starts_at, Booking.class_name)
+    ).all()
+    bookings = _prefer_official_bookings(bookings)
+    bookings = _filter_relevant_bookings(bookings, current_day)
+
+    # Find any clients on today's roster that we don't have cached
+    missing_ids = {
+        b.client_id for b in bookings
+        if b.client_id not in client_by_id
+    }
+    if missing_ids:
+        # Load only the missing clients (typically 0-2 new walk-ins)
+        extra_stmt = (
+            select(Client)
+            .where(Client.id.in_(missing_ids))
+            .options(
+                selectinload(Client.activity),
+                selectinload(Client.notes),
+                selectinload(Client.milestones),
+                selectinload(Client.profile_data),
+                selectinload(Client.preferences),
+                selectinload(Client.memberships),
+                selectinload(Client.flags),
+            )
+        )
+        for client in db.scalars(extra_stmt).all():
+            client_by_id[client.id] = client
+            if client.momence_member_id:
+                client_by_member_id[client.momence_member_id] = client
+            people[_slug_client(client)] = _client_to_demo_person(client)
+
+    # Attach today's bookings to client objects so _booking_class_number_today
+    # can find them without lazy-loading from the DB.
+    bookings_by_client: dict[Any, list[Booking]] = defaultdict(list)
+    for b in bookings:
+        bookings_by_client[b.client_id].append(b)
+    for client_id, client_bookings in bookings_by_client.items():
+        client = client_by_id.get(client_id)
+        if client is not None:
+            from sqlalchemy.orm.attributes import set_committed_value
+            set_committed_value(client, "bookings", client_bookings)
+
+    # Group bookings by session
+    grouped: dict[str, list[Booking]] = defaultdict(list)
+    for booking in bookings:
+        grouped[booking.momence_session_id].append(booking)
+
+    # Build sessions from grouped bookings
+    sessions = []
+    for session_id, session_bookings in grouped.items():
+        first = session_bookings[0]
+        ordered_bookings = sorted(
+            session_bookings,
+            key=lambda b: _roster_sort_key(client_by_id.get(b.client_id), now)
+            if client_by_id.get(b.client_id) is not None
+            else (1, ""),
+        )
+        roster = []
+        special_returns = 0
+        birthdays = 0
+        milestones_count = 0
+        for booking in ordered_bookings:
+            client = client_by_id.get(booking.client_id)
+            if client is None:
+                continue
+            flags_summary = build_flag_summary(client, now)
+            if flags_summary.welcome_back:
+                special_returns += 1
+            if flags_summary.birthday_this_week:
+                birthdays += 1
+            current_milestone = _booking_milestone_label(client, booking, now)
+            if current_milestone:
+                milestones_count += 1
+            roster.append(_client_to_roster_item(client, booking))
+
+        sessions.append(
+            _build_session_card(
+                session_id,
+                first.class_name,
+                first.starts_at,
+                first.instructor_name,
+                first.location_name,
+                roster,
+                birthdays=birthdays,
+                milestones_count=milestones_count,
+                special_returns=special_returns,
+            )
+        )
+
+    # Build frontdesk from bookings
+    seen_clients: set = set()
+    frontdesk = []
+    for booking in bookings[:12]:
+        client = client_by_id.get(booking.client_id)
+        if client is None or client.id in seen_clients:
+            continue
+        seen_clients.add(client.id)
+        frontdesk.append(_client_to_frontdesk_item(client, booking))
+        if len(frontdesk) >= 6:
+            break
+
+    # Summary stats
+    checked_in_count = len({b.client_id for b in bookings if b.status == "checked_in"})
+    new_clients_count = 0
+    milestone_count = 0
+    birthdays_today_count = 0
+    seen_milestone: set[str] = set()
+    for booking in bookings:
+        client = client_by_id.get(booking.client_id)
+        if client is None:
+            continue
+        if _booking_class_number_today(client, booking, now) == 1:
+            new_clients_count += 1
+        if client.momence_member_id and client.momence_member_id not in seen_milestone:
+            if _booking_milestone_label(client, booking, now):
+                milestone_count += 1
+                seen_milestone.add(client.momence_member_id)
+        if build_flag_summary(client, now).birthday_today:
+            birthdays_today_count += 1
+
+    freshness = [
+        {
+            "domain": item["domain"].replace("_", " "),
+            "status": item["status"],
+            "note": "Updates at 10:00 AM" if item["domain"] == "bookings" and item["is_stale"] else (
+                _as_local(item["last_successful_at"]).strftime("updated at %-I:%M %p")
+                if item["last_successful_at"]
+                else "waiting for first sync"
+            ),
+        }
+        for item in get_freshness_map(db, now).values()
+    ]
+
+    selected_profile_id = frontdesk[0]["id"] if frontdesk else next(iter(people.keys()), None)
+    return {
+        "meta": {
+            "liveProfiles": True,
+            "liveBookings": bool(bookings),
+            "day": current_day.isoformat(),
+            "dayLabel": current_day_label,
+            "selectedProfileId": selected_profile_id,
+            "selectedSessionId": sessions[0]["id"] if sessions else None,
+        },
+        "summary": [
+            {"label": "Class live now", "value": len(sessions)},
+            {"label": "People checked in", "value": checked_in_count},
+            {"label": "New clients today", "value": new_clients_count},
+            {"label": "Milestones today", "value": milestone_count},
+            {"label": "Birthdays today", "value": birthdays_today_count},
+        ],
+        "freshness": freshness,
+        "frontdesk": frontdesk,
+        "sessions": sessions,
+    }
+
+
 def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     current_day = _resolve_demo_day(db, day)
     now = datetime.now(timezone.utc)
