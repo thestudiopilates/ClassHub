@@ -297,7 +297,13 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
     # Enrich profile data (fun fact, heard about us, pregnancy)
     custom_fields = {f.get("label", ""): f.get("value") for f in profile.get("customerFields", [])}
     if custom_fields:
-        profile_data = client.profile_data or ClientProfileData(client_id=client.id)
+        # Use get-or-create pattern to avoid duplicate key errors
+        profile_data = client.profile_data
+        if profile_data is None:
+            profile_data = db.get(ClientProfileData, client.id)
+        if profile_data is None:
+            profile_data = ClientProfileData(client_id=client.id)
+            db.add(profile_data)
         fun_fact = custom_fields.get("Tell us one fun fact about you!")
         if fun_fact:
             profile_data.fun_fact = fun_fact
@@ -308,7 +314,6 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
         if pregnant:
             profile_data.pregnant_status = pregnant
         profile_data.updated_at = now
-        db.merge(profile_data)
 
     db.query(ClientMembership).filter(ClientMembership.client_id == client.id).delete()
     membership_rows = _normalize_membership_rows(memberships, now)
