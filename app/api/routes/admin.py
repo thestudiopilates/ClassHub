@@ -138,6 +138,15 @@ def run_enrich_all_profiles(
     return result
 
 
+@router.get("/debug/member/{member_id}")
+async def debug_member_profile(member_id: str) -> dict:
+    """Inspect raw Momence API response for a member."""
+    import asyncio
+    api = MomenceClient()
+    profile = await api.fetch_member_profile(member_id)
+    return {"profile_keys": list(profile.keys()) if isinstance(profile, dict) else "not-a-dict", "visits": profile.get("visits"), "totalVisits": profile.get("totalVisits"), "checkIns": profile.get("checkIns"), "raw_snippet": {k: profile[k] for k in list(profile.keys())[:20]} if isinstance(profile, dict) else str(profile)[:500]}
+
+
 @router.post("/sync/browser/customers", response_model=SyncRunResponse)
 def run_browser_customer_sync(db: Session = Depends(get_db)) -> SyncRunResponse:
     return sync_active_customers_from_browser(db)
