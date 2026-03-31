@@ -468,7 +468,7 @@ function currentDayLabel() {
 }
 
 function getPerson(personId) {
-  return currentData.people[personId];
+  return currentData.people[personId] || { id: personId, name: personId, membership: "", funFact: "", churnRisk: {}, profile: { firstName: "", fullName: personId, subtext: "", details: [], chips: [], notes: [] } };
 }
 
 function locationLabel() {

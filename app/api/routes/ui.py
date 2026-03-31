@@ -28,6 +28,8 @@ _dashboard: dict[str, Any] = {"payload": None, "day": None, "built_at": 0.0}
 
 # How long a class lasts (minutes) — used to determine when a class has ended
 _CLASS_DURATION_MINUTES = 55
+# How far ahead to show upcoming sessions (hours)
+_LOOKAHEAD_HOURS = 3
 
 
 def invalidate_demo_cache() -> None:
@@ -37,7 +39,8 @@ def invalidate_demo_cache() -> None:
 
 
 def _filter_sessions_by_time(sessions: list[dict], now: datetime) -> list[dict]:
-    """Show current + all remaining sessions for the day. Hide ended classes."""
+    """Show current + next 3 hours of classes. Hide ended classes."""
+    lookahead_cutoff = now + timedelta(hours=_LOOKAHEAD_HOURS)
     visible = []
     for session in sessions:
         starts_utc_str = session.get("startsAtUtc")
@@ -51,13 +54,16 @@ def _filter_sessions_by_time(sessions: list[dict], now: datetime) -> list[dict]:
         except (ValueError, TypeError):
             visible.append(session)
             continue
-        # A class is "ended" when its duration has passed
+        # Hide ended classes
         session_end = starts_utc + timedelta(minutes=_CLASS_DURATION_MINUTES)
         if session_end < now:
-            continue  # ended — hide
+            continue
+        # Hide classes more than 3 hours out
+        if starts_utc > lookahead_cutoff:
+            continue
         visible.append(session)
 
-    # Sort: in-progress first, then by start time
+    # Sort by start time
     visible.sort(key=lambda s: s.get("startsAtUtc") or "")
     return visible
 
