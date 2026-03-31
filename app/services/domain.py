@@ -90,7 +90,7 @@ def get_client_profile(db: Session, momence_member_id: str) -> ClientProfileResp
             selectinload(Client.activity),
             selectinload(Client.notes),
             selectinload(Client.milestones),
-            selectinload(Client.bookings),
+            selectinload(Client.bookings.and_(Booking.starts_at >= now - timedelta(days=90))),
             selectinload(Client.profile_data),
             selectinload(Client.preferences),
         )
@@ -122,6 +122,8 @@ def _get_clients_for_bookings(db: Session, booking_ids: list[str]) -> dict[str, 
 
 
 def get_front_desk_view(db: Session, day: date, location_name: str | None) -> FrontDeskResponse:
+    now = datetime.now(timezone.utc)
+    booking_cutoff = now - timedelta(days=90)
     start_dt, end_dt = _local_day_bounds(day)
     stmt = select(Booking).where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
     if location_name:
@@ -137,11 +139,10 @@ def get_front_desk_view(db: Session, day: date, location_name: str | None) -> Fr
             selectinload(Client.activity),
             selectinload(Client.notes),
             selectinload(Client.milestones),
-            selectinload(Client.bookings),
+            selectinload(Client.bookings.and_(Booking.starts_at >= booking_cutoff)),
         )
     )
     clients = {client.id: client for client in db.scalars(clients_stmt).all()}
-    now = datetime.now(timezone.utc)
 
     arrivals = []
     for booking in bookings:
@@ -180,6 +181,8 @@ def get_front_desk_view(db: Session, day: date, location_name: str | None) -> Fr
 def get_instructor_view(
     db: Session, day: date, session_id: str | None, instructor_name: str | None
 ) -> InstructorResponse:
+    now = datetime.now(timezone.utc)
+    booking_cutoff = now - timedelta(days=90)
     start_dt, end_dt = _local_day_bounds(day)
     stmt = select(Booking).where(Booking.starts_at >= start_dt, Booking.starts_at < end_dt)
     if session_id:
@@ -196,11 +199,10 @@ def get_instructor_view(
             selectinload(Client.activity),
             selectinload(Client.notes),
             selectinload(Client.milestones),
-            selectinload(Client.bookings),
+            selectinload(Client.bookings.and_(Booking.starts_at >= booking_cutoff)),
         )
     )
     clients = {client.id: client for client in db.scalars(clients_stmt).all()}
-    now = datetime.now(timezone.utc)
 
     grouped: dict[str, list[Booking]] = defaultdict(list)
     for booking in bookings:
