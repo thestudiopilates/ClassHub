@@ -270,7 +270,14 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
     activity.activity_updated_at = now
 
     # Enrich from member profile: visits, first/last seen, birthday
-    api_visits = profile.get("visits")
+    # Momence returns visits as a dict: {totalVisits: N, bookingsVisits: N, ...}
+    api_visits_raw = profile.get("visits")
+    if isinstance(api_visits_raw, dict):
+        api_visits = api_visits_raw.get("totalVisits") or api_visits_raw.get("total") or 0
+    elif isinstance(api_visits_raw, int):
+        api_visits = api_visits_raw
+    else:
+        api_visits = 0
     if api_visits and isinstance(api_visits, int):
         activity.total_visits = max(activity.total_visits or 0, api_visits)
     first_seen = _parse_iso_datetime(profile.get("firstSeen"))
