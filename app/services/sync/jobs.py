@@ -1182,6 +1182,62 @@ def refresh_client_by_member_id(db: Session, momence_member_id: str) -> SyncRunR
     return refresh_clients_by_member_ids(db, [momence_member_id])
 
 
+def enrich_all_unenriched_clients(db: Session, *, batch_size: int = 50) -> SyncRunResponse:
+    """Enrich profile data for all clients missing fun facts / heard-about-us.
+
+    Processes in batches to avoid API rate limits. Designed to be called
+    repeatedly (e.g. from a cron or admin trigger) until all clients are done.
+    """
+    run = _start_run(db, "enrich_all_unenriched")
+    try:
+        # Find clients that have no profile_data row OR have null fun_fact
+        from sqlalchemy.orm import joinedload
+
+        all_clients = (
+            db.query(Client)
+            .outerjoin(ClientProfileData)
+            .filter(
+                (ClientProfileData.id == None) | (ClientProfileData.fun_fact == None)  # noqa: E711
+            )
+            .filter(Client.momence_member_id != None, Client.momence_member_id != "")  # noqa: E711
+            .limit(batch_size)
+            .all()
+        )
+
+        if not all_clients:
+            return _finish_run(db, run, "completed", 0)
+
+        member_ids = [c.momence_member_id for c in all_clients if c.momence_member_id]
+        now = datetime.now(timezone.utc)
+        api_client = MomenceClient()
+        client_map = {c.momence_member_id: c for c in all_clients}
+        records_processed = 0
+        failures: list[str] = []
+
+        for member_id in member_ids:
+            try:
+                profile = asyncio.run(api_client.fetch_member_profile(member_id))
+                notes = asyncio.run(api_client.fetch_member_notes(member_id))
+                memberships = asyncio.run(api_client.fetch_member_memberships(member_id))
+                context = {"notes": notes, "memberships": memberships, "profile": profile}
+                records_processed += _apply_member_context(db, client_map[member_id], context, now)
+            except Exception as exc:
+                failures.append(f"{member_id}: {exc}")
+
+        db.commit()
+        refresh_all_flags(db)
+        record_sync_state(
+            db, "memberships_notes", status="completed" if not failures else "partial",
+            records_processed=records_processed,
+            error_text="; ".join(failures[:5]) if failures else None,
+        )
+        return _finish_run(db, run, "completed" if not failures else "partial", records_processed,
+                           "; ".join(failures[:5]) if failures else None)
+    except Exception as exc:
+        db.rollback()
+        return _finish_run(db, run, "failed", 0, str(exc))
+
+
 def recompute_flags_job(db: Session) -> SyncRunResponse:
     run = _start_run(db, "recompute_flags")
     try:

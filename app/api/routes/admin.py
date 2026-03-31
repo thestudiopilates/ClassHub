@@ -23,6 +23,7 @@ from app.services.momence.token_store import save_tokens
 from app.services.domain import refresh_all_flags
 from app.services.sync_state import record_sync_state
 from app.services.sync.jobs import (
+    enrich_all_unenriched_clients,
     get_booking_history_progress,
     refresh_clients_by_member_ids,
     refresh_client_by_member_id,
@@ -109,6 +110,16 @@ def run_targeted_client_context_refresh(
     request: TargetedRefreshRequest, db: Session = Depends(get_db)
 ) -> SyncRunResponse:
     return refresh_clients_by_member_ids(db, request.member_ids)
+
+
+@router.post("/sync/enrich-profiles", response_model=SyncRunResponse)
+def run_enrich_all_profiles(
+    batch_size: int = Query(default=50, le=200),
+    db: Session = Depends(get_db),
+) -> SyncRunResponse:
+    result = enrich_all_unenriched_clients(db, batch_size=batch_size)
+    invalidate_demo_cache()
+    return result
 
 
 @router.post("/sync/browser/customers", response_model=SyncRunResponse)
