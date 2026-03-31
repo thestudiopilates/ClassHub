@@ -1197,7 +1197,7 @@ def enrich_all_unenriched_clients(db: Session, *, batch_size: int = 50) -> SyncR
             db.query(Client)
             .outerjoin(ClientProfileData)
             .filter(
-                (ClientProfileData.id == None) | (ClientProfileData.fun_fact == None)  # noqa: E711
+                (ClientProfileData.client_id == None) | (ClientProfileData.fun_fact == None)  # noqa: E711
             )
             .filter(Client.momence_member_id != None, Client.momence_member_id != "")  # noqa: E711
             .limit(batch_size)
