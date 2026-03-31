@@ -131,9 +131,10 @@ def run_session_refresh(
 @router.post("/sync/enrich-profiles", response_model=SyncRunResponse)
 def run_enrich_all_profiles(
     batch_size: int = Query(default=50, le=200),
+    force: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> SyncRunResponse:
-    result = enrich_all_unenriched_clients(db, batch_size=batch_size)
+    result = enrich_all_unenriched_clients(db, batch_size=batch_size, force_all=force)
     invalidate_demo_cache()
     return result
 

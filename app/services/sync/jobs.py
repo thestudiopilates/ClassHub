@@ -1194,27 +1194,27 @@ def refresh_client_by_member_id(db: Session, momence_member_id: str) -> SyncRunR
     return refresh_clients_by_member_ids(db, [momence_member_id])
 
 
-def enrich_all_unenriched_clients(db: Session, *, batch_size: int = 50) -> SyncRunResponse:
-    """Enrich profile data for all clients missing fun facts / heard-about-us.
+def enrich_all_unenriched_clients(db: Session, *, batch_size: int = 50, force_all: bool = False) -> SyncRunResponse:
+    """Enrich profile data for clients. Re-fetches visits from Momence API.
 
-    Processes in batches to avoid API rate limits. Designed to be called
-    repeatedly (e.g. from a cron or admin trigger) until all clients are done.
+    When force_all=True, re-enriches ALL clients (not just unenriched ones).
+    Processes in batches. Designed to be called repeatedly until all are done.
     """
     run = _start_run(db, "enrich_all_unenriched")
     try:
-        # Find clients that have no profile_data row OR have null fun_fact
-        from sqlalchemy.orm import joinedload
-
-        all_clients = (
+        query = (
             db.query(Client)
-            .outerjoin(ClientProfileData)
-            .filter(
-                (ClientProfileData.client_id == None) | (ClientProfileData.fun_fact == None)  # noqa: E711
-            )
             .filter(Client.momence_member_id != None, Client.momence_member_id != "")  # noqa: E711
-            .limit(batch_size)
-            .all()
         )
+        if not force_all:
+            query = (
+                query
+                .outerjoin(ClientProfileData)
+                .filter(
+                    (ClientProfileData.client_id == None) | (ClientProfileData.fun_fact == None)  # noqa: E711
+                )
+            )
+        all_clients = query.limit(batch_size).all()
 
         if not all_clients:
             return _finish_run(db, run, "completed", 0)
