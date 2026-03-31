@@ -6,7 +6,7 @@ import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, desc, func, or_, select
+from sqlalchemy import and_ as sa_and, case, desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import Booking, Client, ClientActivity, ClientFlag, Milestone
@@ -583,6 +583,25 @@ def _build_session_card(
     }
 
 
+def _client_load_options(now: datetime) -> list:
+    """Standard eager-load options for Client queries.
+
+    Only loads bookings from the last 90 days to avoid pulling
+    thousands of historical rows per client.
+    """
+    booking_cutoff = now - timedelta(days=90)
+    return [
+        selectinload(Client.activity),
+        selectinload(Client.notes),
+        selectinload(Client.milestones),
+        selectinload(Client.profile_data),
+        selectinload(Client.preferences),
+        selectinload(Client.memberships),
+        selectinload(Client.bookings.and_(Booking.starts_at >= booking_cutoff)),
+        selectinload(Client.flags),
+    ]
+
+
 def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     current_day = _resolve_demo_day(db, day)
     now = datetime.now(timezone.utc)
@@ -590,21 +609,13 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
     front_desk_view = get_front_desk_view(db, current_day, None)
     instructor_view = get_instructor_view(db, current_day, None, None)
 
+    load_opts = _client_load_options(now)
     active_stmt = (
         select(Client)
         .join(ClientFlag, ClientFlag.client_id == Client.id)
         .outerjoin(ClientActivity, ClientActivity.client_id == Client.id)
         .where(ClientFlag.is_active_180d.is_(True))
-        .options(
-            selectinload(Client.activity),
-            selectinload(Client.notes),
-            selectinload(Client.milestones),
-            selectinload(Client.profile_data),
-            selectinload(Client.preferences),
-            selectinload(Client.memberships),
-            selectinload(Client.bookings),
-            selectinload(Client.flags),
-        )
+        .options(*load_opts)
         .order_by(
             desc(ClientFlag.birthday_this_week),
             desc(ClientFlag.welcome_back_flag),
@@ -658,16 +669,7 @@ def build_demo_payload(db: Session, day: date | None = None) -> dict[str, Any]:
         extra_stmt = (
             select(Client)
             .where(or_(*filters))
-            .options(
-                selectinload(Client.activity),
-                selectinload(Client.notes),
-                selectinload(Client.milestones),
-                selectinload(Client.profile_data),
-                selectinload(Client.preferences),
-                selectinload(Client.memberships),
-                selectinload(Client.bookings),
-                selectinload(Client.flags),
-            )
+            .options(*load_opts)
         )
         extra_clients = db.scalars(extra_stmt).all()
         for client in extra_clients:

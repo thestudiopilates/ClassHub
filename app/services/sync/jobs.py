@@ -308,7 +308,7 @@ def _apply_member_context(db: Session, client: Client, context: dict, now: datet
         if pregnant:
             profile_data.pregnant_status = pregnant
         profile_data.updated_at = now
-        db.add(profile_data)
+        db.merge(profile_data)
 
     db.query(ClientMembership).filter(ClientMembership.client_id == client.id).delete()
     membership_rows = _normalize_membership_rows(memberships, now)
